@@ -75,15 +75,16 @@ async def get_auth_context(
         db_scope=api_key_cfg.db_scope,
         fs_scope=api_key_cfg.fs_scope,
         rate_limit_override=api_key_cfg.rate_limit_override,
+        full_admin=api_key_cfg.full_admin,
     )
 
 
 async def require_admin(auth: AuthContext = Depends(get_auth_context)) -> AuthContext:
-    """Restrict endpoint to keys named 'admin' or with mode readwrite."""
-    if auth.api_key_name != "admin" and auth.mode != ServerMode.READWRITE:
+    """Restrict endpoint to keys with full_admin=true flag."""
+    if not auth.full_admin:
         raise NexusGateException(
             code=ErrorCodes.AUTH_INSUFFICIENT_MODE,
-            message="Admin-level API key required for this endpoint.",
+            message="Admin-level API key required for this action.",
             status_code=403,
         )
     return auth

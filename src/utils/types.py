@@ -49,6 +49,7 @@ class AuthContext(BaseModel):
     db_scope: List[str]
     fs_scope: List[str]
     rate_limit_override: int
+    full_admin: bool = False
 
 class RequestMeta(BaseModel):
     request_id: str

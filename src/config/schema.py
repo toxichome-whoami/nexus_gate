@@ -103,6 +103,7 @@ class ApiKeyDefConfig(BaseModel):
     db_scope: List[str] = Field(default_factory=lambda: ["*"])
     fs_scope: List[str] = Field(default_factory=lambda: ["*"])
     rate_limit_override: int = 0
+    full_admin: bool = False
 
     @field_validator('secret')
     def validate_secret_length(cls, v):
