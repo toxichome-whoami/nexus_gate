@@ -98,7 +98,12 @@ async def execute_query(
         from webhook.emitter import emit_event, WebhookTrigger
         mod_type = "read" if op in ("select", "show", "describe") else ("delete" if op == "delete" else "write")
         emit_event("db", mod_type, db_name, table, op.upper(), {"affected": result.affected_rows or 0},
-                WebhookTrigger(api_key=auth.api_key_name, ip=request.client.host if request.client else "", request_id=getattr(request.state, "request_id", "-")))
+        WebhookTrigger(
+            api_key=auth.api_key_name,
+            ip=request.client.host if request.client else "",
+            request_id=getattr(request.state, "request_id", "-"),
+            webhook_token=request.headers.get("X-NexusGate-Webhook-Token")
+        ))
 
         return success_response(request, {
             "columns": result.columns,
@@ -185,7 +190,12 @@ async def insert_rows(
 
         from webhook.emitter import emit_event, WebhookTrigger
         emit_event("db", "write", db_name, table_name, "INSERT", {"affected": total_affected},
-                   WebhookTrigger(api_key=auth.api_key_name, ip=request.client.host if request.client else "", request_id=getattr(request.state, "request_id", "-")))
+        WebhookTrigger(
+            api_key=auth.api_key_name,
+            ip=request.client.host if request.client else "",
+            request_id=getattr(request.state, "request_id", "-"),
+            webhook_token=request.headers.get("X-NexusGate-Webhook-Token")
+        ))
 
         return success_response(request, {"affected_rows": total_affected})
     except Exception as e:
@@ -214,7 +224,12 @@ async def update_rows(
 
         from webhook.emitter import emit_event, WebhookTrigger
         emit_event("db", "write", db_name, table_name, "UPDATE", {"affected": result.affected_rows or 0},
-                   WebhookTrigger(api_key=auth.api_key_name, ip=request.client.host if request.client else "", request_id=getattr(request.state, "request_id", "-")))
+        WebhookTrigger(
+            api_key=auth.api_key_name,
+            ip=request.client.host if request.client else "",
+            request_id=getattr(request.state, "request_id", "-"),
+            webhook_token=request.headers.get("X-NexusGate-Webhook-Token")
+        ))
 
         return success_response(request, {"affected_rows": result.affected_rows})
     except Exception as e:
@@ -243,7 +258,12 @@ async def delete_rows(
 
         from webhook.emitter import emit_event, WebhookTrigger
         emit_event("db", "delete", db_name, table_name, "DELETE", {"affected": result.affected_rows or 0},
-                   WebhookTrigger(api_key=auth.api_key_name, ip=request.client.host if request.client else "", request_id=getattr(request.state, "request_id", "-")))
+        WebhookTrigger(
+            api_key=auth.api_key_name,
+            ip=request.client.host if request.client else "",
+            request_id=getattr(request.state, "request_id", "-"),
+            webhook_token=request.headers.get("X-NexusGate-Webhook-Token")
+        ))
 
         return success_response(request, {"affected_rows": result.affected_rows})
     except Exception as e:

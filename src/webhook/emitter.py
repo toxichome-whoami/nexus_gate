@@ -13,6 +13,7 @@ class WebhookTrigger(BaseModel):
     api_key: str
     ip: Optional[str] = None
     request_id: str
+    webhook_token: Optional[str] = None
 
 class WebhookEventDetails(BaseModel):
     module: str
@@ -31,7 +32,7 @@ class WebhookPayload(BaseModel):
 
 class WebhookQueueList:
     _queue: Optional[asyncio.Queue] = None
-    
+
     @classmethod
     def get_queue(cls) -> asyncio.Queue:
         if cls._queue is None:
@@ -40,33 +41,33 @@ class WebhookQueueList:
         return cls._queue
 
 def emit_event(
-    module: str, 
-    operation: str, 
-    resource: str, 
-    target: str, 
-    action: str, 
-    details: Dict[str, Any], 
+    module: str,
+    operation: str,
+    resource: str,
+    target: str,
+    action: str,
+    details: Dict[str, Any],
     trigger: WebhookTrigger
 ) -> None:
     config = ConfigManager.get()
     if not config.features.webhook or not config.webhooks.enabled:
         return
-        
+
     rules_matched = []
-    
+
     # Simple rule matcher: "module.operation@alias:target"
     for name, hook in config.webhook.items():
         if not hook.enabled:
             continue
-            
+
         r_mod_op, r_alias_target = hook.rule.split("@")
         r_mod, r_op = r_mod_op.split(".")
         r_alias, r_target = r_alias_target.split(":")
-        
+
         mod_match = r_mod in ("*", module)
         op_match = r_op in ("*", "any", operation)
         alias_match = r_alias in ("*", resource)
-        
+
         # Target match might need more complex parsing for comma-separated lists
         target_match = False
         if r_target == "*":
@@ -75,13 +76,16 @@ def emit_event(
             targets = [t.strip() for t in r_target.split(",")]
             if target in targets:
                 target_match = True
-                
-        if mod_match and op_match and alias_match and target_match:
+
+        # Security Upgrade: Check if the original request provided the correct webhook secret/token
+        token_match = (trigger.webhook_token == hook.secret)
+
+        if mod_match and op_match and alias_match and target_match and token_match:
             rules_matched.append((name, hook))
-            
+
     if not rules_matched:
         return
-        
+
     payload = WebhookPayload(
         event_id=f"evt_{uuid7().hex}",
         timestamp=time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
@@ -96,7 +100,7 @@ def emit_event(
         ),
         trigger=trigger
     )
-    
+
     queue = WebhookQueueList.get_queue()
     for name, hook in rules_matched:
         try:
