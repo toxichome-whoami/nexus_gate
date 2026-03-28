@@ -1,0 +1,167 @@
+# ─────────────────────────────────────────────
+# NexusGate — Example Configuration File
+# Copy to config.toml and edit as needed.
+# ─────────────────────────────────────────────
+
+# ─── Server ───────────────────────────────────
+[server]
+host = "0.0.0.0"
+port = 4500
+workers = 0                   # 0 = auto-detect (CPUs * 2 + 1)
+max_connections = 10000
+request_timeout = 30          # Seconds
+body_limit = "10mb"
+tls_cert = ""                 # Path to TLS cert file. Leave blank to disable TLS.
+tls_key = ""                  # Path to TLS private key file.
+allowed_ips = []              # IPs exempt from rate limiting (e.g. ["127.0.0.1"])
+trusted_proxies = ["127.0.0.1"]
+cors_origins = ["*"]          # CORS origins, use ["*"] for all
+shutdown_timeout = 30
+
+# ─── Feature Flags ────────────────────────────
+[features]
+database = true
+storage = true
+webhook = true
+federation = false
+metrics = true
+playground = false            # Enable /api/docs Swagger UI
+
+# ─── Logging ──────────────────────────────────
+[logging]
+level = "INFO"                # TRACE | DEBUG | INFO | WARN | ERROR
+format = "json"               # json | pretty
+directory = "./logs"
+file_prefix = "nexusgate"
+max_file_size = "50mb"
+max_files = 5
+stdout = true
+
+# ─── Rate Limiting ────────────────────────────
+[rate_limit]
+enabled = true
+backend = "memory"            # memory | redis
+redis_url = ""                # Required if backend = "redis"
+window = 60                   # Seconds per window
+max_requests = 100            # Max requests per window per key
+burst = 20                    # Extra burst allowance
+penalty_cooldown = 300        # Seconds to ban after 10 consecutive violations
+
+# ─── Caching ──────────────────────────────────
+[cache]
+enabled = true
+backend = "memory"            # memory | redis
+redis_url = ""
+max_memory = "100mb"
+default_ttl = 60              # Seconds
+query_cache = true
+fs_cache = true
+
+# ─── Webhook Global Settings ──────────────────
+[webhooks]
+enabled = true
+timeout = 5                   # HTTP delivery timeout in seconds
+max_retries = 3
+retry_delay = 2               # Base delay seconds (exponential: delay^attempt)
+queue_size = 10000
+secret_header = "X-NexusGate-Signature"
+
+# ─── Circuit Breaker ──────────────────────────
+[circuit_breaker]
+enabled = true
+failure_threshold = 5         # Failures before tripping OPEN
+success_threshold = 3         # Successes in HALF_OPEN before CLOSED
+timeout = 30                  # Seconds before attempting HALF_OPEN
+
+# ─── API Keys ─────────────────────────────────
+# auto-generated on first run. The key name is the identifier,
+# and the secret must be at least 32 characters long.
+# Auth format: Authorization: Bearer base64(<name>:<secret>)
+
+[api_key.admin]
+secret = "CHANGE_ME_to_a_random_64_char_secret_string_NOW"
+mode = "readwrite"            # readwrite | readonly | writeonly
+db_scope = ["*"]              # ["*"] or specific names e.g. ["main_db", "analytics"]
+fs_scope = ["*"]
+rate_limit_override = 0       # 0 = use global limit
+
+[api_key.readonly_user]
+secret = "CHANGE_ME_to_another_random_64_char_secret_string"
+mode = "readonly"
+db_scope = ["*"]
+fs_scope = ["*"]
+rate_limit_override = 200
+
+# ─── Databases ────────────────────────────────
+# Each key under [database.*] defines a named database alias.
+
+[database.main_db]
+engine = "sqlite"             # sqlite | postgres | mysql | mariadb | mssql
+url = "sqlite:///./data/main.db"
+mode = "readwrite"
+pool_min = 2
+pool_max = 10
+connection_timeout = 5
+idle_timeout = 300
+max_lifetime = 1800
+query_blacklist = ["DROP", "TRUNCATE", "ALTER"]
+dangerous_operations = false
+
+[database.analytics]
+engine = "postgres"
+url = "postgresql://user:password@localhost:5432/analytics"
+mode = "readonly"
+pool_min = 1
+pool_max = 20
+dangerous_operations = false
+
+# ─── Storage Volumes ──────────────────────────
+# Each key under [storage.*] defines a named virtual filesystem root.
+
+[storage.uploads]
+path = "./storage/uploads"
+mode = "readwrite"
+limit = "10gb"
+chunk_size = "10mb"
+max_file_size = "500mb"
+allowed_extensions = []          # [] = all allowed
+blocked_extensions = [".exe", ".bat", ".sh", ".cmd", ".ps1"]
+
+[storage.assets]
+path = "./storage/assets"
+mode = "readonly"
+limit = "5gb"
+chunk_size = "10mb"
+max_file_size = "100mb"
+
+# ─── Webhooks ─────────────────────────────────
+# Rule format: module.operation@alias:target
+# module: db | fs
+# operation: read | write | delete | any | *
+# alias: database or storage alias name, or *
+# target: table name, file path, or *
+
+[webhook.on_user_insert]
+url = "https://example.com/hooks/nexusgate"
+secret = "your-webhook-signing-secret-at-least-32-chars"
+rule = "db.write@main_db:users"
+enabled = true
+
+[webhook.on_any_upload]
+url = "https://example.com/hooks/fs-events"
+secret = "another-secret-for-fs-webhooks-32-chars-min"
+rule = "fs.write@uploads:*"
+enabled = true
+
+# ─── Federation ───────────────────────────────
+# Connect multiple NexusGate instances into a mesh.
+
+[federation]
+enabled = false
+sync_interval = 30            # Seconds between health syncs
+
+[federation.server.edge_us]
+url = "https://nexusgate-us.example.com"
+api_key = "remote_admin_api_key"
+alias = "us_node"
+trust_mode = "verify"         # verify | trust (trust skips TLS cert check)

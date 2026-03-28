@@ -1,0 +1,22 @@
+# NexusGate Architecture
+
+NexusGate is built on an aggressive, fully async architecture utilizing `FastAPI`, `httpx`, and `SQLGlot`.
+
+## The Pipeline
+Every incoming request flows through the following middleware sequence:
+1. **SecurityHeadersMiddleware**: Injects HSTS, CSP, and X-Content-Type headers.
+2. **RequestIDMiddleware**: Tags every request with a UUIDv7 timestamp-sorted ID.
+3. **WAFMiddleware**: Pre-filters oversized payloads, null-byte injections, and standard Path Traversal patterns before the router even sees the data.
+4. **LogMiddleware**: Attaches the request context to `structlog` for structured, parseable JSON logs.
+5. **RateLimitMiddleware**: An IP + API Key sliding window cache enforcing max tokens.
+
+## Handlers
+The pipeline converges at the Router which redirects to:
+- **Database (`/api/db`)**: Where SQLGlot intercepts dynamic JSON-to-SQL logic, walks the AST tree, validates user permissions against statement types (e.g. read-only cannot INSERT), and transpiles syntax dynamically to Postgres/MySQL/SQLite driver pools.
+- **Storage (`/api/fs`)**: Executes zero-copy aiofiles streamed proxies, intercepts chunk assemblies, and processes image thumbnails via Pillow before flushing the response chunk-by-chunk.
+
+## Webhook Queue
+Write events (Uploads, Inserts, Updates, Deletes) are dropped into a non-blocking `asyncio.Queue` via `emitter.py`. The `dispatcher.py` background worker strips items from the queue, calculates `HMAC-SHA256` payload signatures using the target's secret, and attempts delivery via HTTP POST, implementing exponential backoff retries on failure.
+
+## Federation
+Remote NexusGate instances can be configured in `config.toml`. Through `/api/fed/*`, identical structural requests mapped to `alias` are routed via `StreamingResponse` HTTPX clients, bridging queries between geographically isolated servers seamlessly.
