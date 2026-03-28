@@ -82,8 +82,9 @@ class ChunkedUploadManager:
         shutil.rmtree(temp_dir, ignore_errors=True)
         await CacheManager.delete(f"upload:{upload_id}")
         
-        if final_hash != session["checksum_sha256"]:
-            os.remove(target_path)
+        # Final integrity check
+        if session.get("checksum_sha256") and final_hash != session["checksum_sha256"]:
+            if os.path.exists(target_path): os.remove(target_path)
             raise NexusGateException(ErrorCodes.FS_CHECKSUM_MISMATCH, "Final file checksum mismatch", 400)
             
         return {
