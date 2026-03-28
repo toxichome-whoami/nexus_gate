@@ -12,7 +12,7 @@ class PostgresEngine(DatabaseEngine):
             uri = uri.replace("postgres://", "postgresql+asyncpg://")
         elif uri.startswith("postgresql://"):
             uri = uri.replace("postgresql://", "postgresql+asyncpg://")
-            
+
         self.engine: AsyncEngine = create_async_engine(
             uri,
             pool_size=config.pool_min,
@@ -37,8 +37,8 @@ class PostgresEngine(DatabaseEngine):
 
     async def list_tables(self) -> List[TableInfo]:
         sql = """
-        SELECT table_name 
-        FROM information_schema.tables 
+        SELECT table_name
+        FROM information_schema.tables
         WHERE table_schema = 'public'
         """
         async with self.engine.connect() as conn:
@@ -76,8 +76,13 @@ class PostgresEngine(DatabaseEngine):
                 return QueryResult(affected_rows=result.rowcount)
             else:
                 result = await conn.execute(text(sql), params)
-                rows = [dict(row._mapping) for row in result]
-                columns = list(result.keys()) if result.keys() else None
+                rows = []
+                columns = []
+                if result.returns_rows:
+                    rows = [dict(row._mapping) for row in result]
+                    columns = list(result.keys()) if result.keys() else []
+                if not result.returns_rows:
+                    await conn.commit()
                 return QueryResult(columns=columns, rows=rows, affected_rows=result.rowcount)
 
     @property

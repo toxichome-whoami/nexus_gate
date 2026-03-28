@@ -9,14 +9,14 @@ class SQLiteEngine(DatabaseEngine):
     def __init__(self, config: DatabaseDefConfig):
         # SQLAlchemy sqlite URI usually looks like sqlite+aiosqlite:///path/to/db.sqlite
         # If url is provided like sqlite:///path to db or just relative path
-        
+
         uri = config.url
         if not uri.startswith("sqlite+aiosqlite://"):
             if uri.startswith("sqlite://"):
                 uri = uri.replace("sqlite://", "sqlite+aiosqlite://")
             else:
                 uri = f"sqlite+aiosqlite:///{uri}"
-                
+
         self.engine: AsyncEngine = create_async_engine(
             uri,
             pool_size=config.pool_max,
@@ -41,7 +41,7 @@ class SQLiteEngine(DatabaseEngine):
 
     async def list_tables(self) -> List[TableInfo]:
         sql = """
-        SELECT name FROM sqlite_master 
+        SELECT name FROM sqlite_master
         WHERE type='table' AND name NOT LIKE 'sqlite_%';
         """
         async with self.engine.connect() as conn:
@@ -78,8 +78,14 @@ class SQLiteEngine(DatabaseEngine):
                 return QueryResult(affected_rows=result.rowcount)
             else:
                 result = await conn.execute(text(sql), params)
-                rows = [dict(row._mapping) for row in result]
-                columns = list(result.keys()) if result.keys() else None
+                rows = []
+                columns = []
+                if result.returns_rows:
+                    rows = [dict(row._mapping) for row in result]
+                    columns = list(result.keys()) if result.keys() else []
+                if not result.returns_rows:
+                    await conn.commit()
+
                 return QueryResult(columns=columns, rows=rows, affected_rows=result.rowcount)
 
     @property
