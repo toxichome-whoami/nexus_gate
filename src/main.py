@@ -11,7 +11,7 @@ def main():
     config = ConfigManager.load(config_path)
     
     uvicorn.run(
-        "nexusgate.server.app:create_app",
+        "server.app:create_app",
         host=config.server.host,
         port=config.server.port,
         factory=True,

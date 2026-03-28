@@ -10,7 +10,7 @@ def _get_meta(request: Request, start_time: Optional[float] = None) -> RequestMe
         start_time = getattr(request.state, "start_time", time.perf_counter())
         
     duration_ms = (time.perf_counter() - start_time) * 1000
-    from src import __version__ as version # need to create later
+    from __init__ import __version__ as version # need to create later
     
     server_name = ConfigManager.get().server.host
     

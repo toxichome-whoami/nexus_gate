@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from config.loader import ConfigManager
 from webhook.dispatcher import dispatcher_worker
-from logging.rotator import log_rotator_worker
+from logger.rotator import log_rotator_worker
 from api.federation.sync import sync_federated_servers
 from db.pool import DatabasePoolManager
 from cache.__init__ import CacheManager
