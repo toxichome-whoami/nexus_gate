@@ -153,7 +153,7 @@ POST /api/fs/{alias}/action
 
 ## Admin API `/api/admin`
 
-All admin endpoints require a key with `readwrite` mode.
+All admin endpoints require a key with `full_admin` set to `true`.
 
 | Method | Path | Description |
 |--------|------|-------------|
