@@ -18,10 +18,10 @@ def validate_query(sql: str, db_config: DatabaseDefConfig, user_mode: str) -> st
     # 1. Block multi-statement
     if len(expressions) > 1:
         raise NexusGateException(ErrorCodes.DB_QUERY_BLOCKED, "Multiple statements are not allowed.", 403)
-        
+
     expr = expressions[0]
     if not expr:
-         raise NexusGateException(ErrorCodes.DB_QUERY_INVALID, "Empty query.", 400)
+        raise NexusGateException(ErrorCodes.DB_QUERY_INVALID, "Empty query.", 400)
 
     # 2. Check query type vs user mode
     is_select = isinstance(expr, (exp.Select, exp.Show, exp.Describe))
@@ -33,12 +33,12 @@ def validate_query(sql: str, db_config: DatabaseDefConfig, user_mode: str) -> st
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "API Key mode 'writeonly' cannot execute read queries.", 403)
 
     # 3. Block dangerous operations if configured
-    dangerous_classes = (exp.Drop, exp.Alter, exp.Create, exp.Command) 
-    
+    dangerous_classes = (exp.Drop, exp.Alter, exp.Create, exp.Command)
+
     if not db_config.dangerous_operations:
         if isinstance(expr, dangerous_classes):
             raise NexusGateException(ErrorCodes.DB_QUERY_BLOCKED, "Dangerous operations (DROP/ALTER/CREATE/etc) are disabled globally on this database.", 403)
-            
+
         # specifically check TRUNCATE which is sometimes parsed differently
         if isinstance(expr, exp.Command) and 'TRUNCATE' in expr.sql().upper():
             raise NexusGateException(ErrorCodes.DB_QUERY_BLOCKED, "TRUNCATE is disabled globally on this database.", 403)
@@ -51,5 +51,16 @@ def validate_query(sql: str, db_config: DatabaseDefConfig, user_mode: str) -> st
     if db_config.query_whitelist and query_type not in [q.upper() for q in db_config.query_whitelist]:
         raise NexusGateException(ErrorCodes.DB_QUERY_BLOCKED, f"Operation '{query_type}' is not whitelisted.", 403)
 
-    return expr.sql()
+    # 5. Extract metadata for webhooks
+    operation = query_type.lower()
+
+    table_name = "*"
+    try:
+        tables = list(expr.find_all(exp.Table))
+        if tables:
+            table_name = tables[0].name
+    except:
+        pass
+
+    return expr.sql(), operation, table_name
 
