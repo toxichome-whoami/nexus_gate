@@ -264,12 +264,12 @@ async def create_webhook(request: Request, body: dict = Body(...), auth=Depends(
     if not name:
         raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "Webhook name required", 400)
 
-    await SecurityStorage.add_dynamic_webhook(name, body)
+    await SecurityStorage.add_webhook(name, body)
     return success_response(request, {"created_webhook": name})
 
 @router.delete("/webhooks/{name}")
 async def delete_webhook(request: Request, name: str = Path(...), auth=Depends(require_admin)):
-    removed = await SecurityStorage.delete_dynamic_webhook(name)
+    removed = await SecurityStorage.delete_webhook(name)
     if not removed:
         raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"Dynamic Webhook '{name}' not found", 404)
 

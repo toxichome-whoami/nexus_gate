@@ -89,7 +89,7 @@ class SecurityStorage:
                 ''')
                 # Dynamic Webhooks table
                 await db.execute('''
-                    CREATE TABLE IF NOT EXISTS dynamic_webhooks (
+                    CREATE TABLE IF NOT EXISTS webhooks (
                         name TEXT PRIMARY KEY,
                         url TEXT NOT NULL,
                         secret TEXT NOT NULL,
@@ -164,7 +164,7 @@ class SecurityStorage:
                         dangerous_operations=bool(row[9])
                     )
 
-            async with db.execute('SELECT name, url, secret, rule, enabled FROM dynamic_webhooks') as cursor:
+            async with db.execute('SELECT name, url, secret, rule, enabled FROM webhooks') as cursor:
                 async for row in cursor:
                     config.webhook[row[0]] = WebhookDefConfig(
                         url=row[1], secret=row[2], rule=row[3], enabled=bool(row[4])
@@ -323,10 +323,10 @@ class SecurityStorage:
         return False
 
     @classmethod
-    async def add_dynamic_webhook(cls, name: str, cfg: dict):
+    async def add_webhook(cls, name: str, cfg: dict):
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('''
-                INSERT OR REPLACE INTO dynamic_webhooks
+                INSERT OR REPLACE INTO webhooks
                 (name, url, secret, rule, enabled)
                 VALUES (?, ?, ?, ?, ?)
             ''', (name, cfg["url"], cfg["secret"], cfg["rule"], int(cfg.get("enabled", True))))
@@ -334,9 +334,9 @@ class SecurityStorage:
         await cls._reload_caches()
 
     @classmethod
-    async def delete_dynamic_webhook(cls, name: str) -> bool:
+    async def delete_webhook(cls, name: str) -> bool:
         async with aiosqlite.connect(DB_PATH) as db:
-            cursor = await db.execute('DELETE FROM dynamic_webhooks WHERE name = ?', (name,))
+            cursor = await db.execute('DELETE FROM webhooks WHERE name = ?', (name,))
             await db.commit()
             if cursor.rowcount > 0:
                 config = ConfigManager.get()
