@@ -52,14 +52,7 @@ def create_app() -> FastAPI:
 
     # Middleware stack — added in reverse execution order
     # Innermost (runs last): SecurityHeaders
-    # Outermost (runs first): ProxyHeaders, followed by Logging
-
-    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
-    app.add_middleware(
-        ProxyHeadersMiddleware, 
-        trusted_hosts=config.server.trusted_proxies
-    )
-    
+    # Outermost (runs first): Logging
     app.add_middleware(LoggingMiddleware)
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(IdempotencyMiddleware)
