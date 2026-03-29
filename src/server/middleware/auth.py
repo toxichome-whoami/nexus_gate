@@ -15,6 +15,8 @@ async def get_auth_context(
 ) -> AuthContext:
     """Validate API key from base64 encoded Bearer token."""
     from security.ban_list import BanList
+    from security.storage import SecurityStorage
+    import hashlib
 
     config = ConfigManager.get()
 
@@ -48,6 +50,28 @@ async def get_auth_context(
             status_code=403,
         )
 
+    # 1. Check Dynamic Keys (SQLite DB via Cache)
+    db_key = SecurityStorage.get_api_key(key_name)
+    if db_key:
+        provided_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+        if not hmac.compare_digest(db_key["secret_hash"].encode("utf-8"), provided_hash.encode("utf-8")):
+            try:
+                from api.core.metrics import increment
+                increment("auth_failures")
+            except Exception:
+                pass
+            raise NexusGateException(code=ErrorCodes.AUTH_INVALID_SECRET, message="Invalid credentials.", status_code=401)
+            
+        return AuthContext(
+            api_key_name=key_name,
+            mode=ServerMode(db_key["mode"]),
+            db_scope=db_key["db_scope"],
+            fs_scope=db_key["fs_scope"],
+            rate_limit_override=db_key["rate_limit_override"],
+            full_admin=db_key["full_admin"],
+        )
+
+    # 2. Check Static Keys (config.toml)
     api_key_cfg = config.api_key.get(key_name)
     if not api_key_cfg:
         raise NexusGateException(

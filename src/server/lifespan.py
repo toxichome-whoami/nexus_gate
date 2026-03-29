@@ -8,6 +8,7 @@ from logger.rotator import log_rotator_worker
 from api.federation.sync import sync_federated_servers
 from db.pool import DatabasePoolManager
 from cache.__init__ import CacheManager
+from security.storage import SecurityStorage
 
 logger = structlog.get_logger()
 
@@ -19,6 +20,9 @@ async def lifespan(app: FastAPI):
     
     # 1. Start Config Watcher (background task)
     config_task = asyncio.create_task(ConfigManager.watch())
+    
+    # 1.5 Init Security Database (Bans, Keys, etc.)
+    await SecurityStorage.init_db()
     
     # 2. Init DB Pools (done lazily on first request via DatabasePoolManager, but we can log)
     logger.info("Database pools initialized (lazy connecting on demand)")

@@ -5,15 +5,17 @@ Only accessible with a key that has admin-level privileges.
 """
 from fastapi import APIRouter, Depends, Request, Path, Body
 from typing import Optional
+import secrets
+import string
+import hashlib
 
-from server.middleware.auth import get_auth_context, require_admin
+from server.middleware.auth import require_admin
 from api.responses import success_response
 from api.errors import NexusGateException, ErrorCodes
 from config.loader import ConfigManager
 from security.ban_list import BanList
 from security.circuit_breaker import CircuitBreaker
-from utils.uuid7 import uuid7
-import secrets
+from security.storage import SecurityStorage
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -24,14 +26,32 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 async def list_api_keys(request: Request, auth=Depends(require_admin)):
     config = ConfigManager.get()
     keys = []
+    
+    # 1. Static keys
     for name, key_cfg in config.api_key.items():
         keys.append({
             "name": name,
+            "source": "config.toml",
             "mode": key_cfg.mode.value,
             "db_scope": key_cfg.db_scope,
             "fs_scope": key_cfg.fs_scope,
             "rate_limit_override": key_cfg.rate_limit_override,
+            "full_admin": key_cfg.full_admin
         })
+        
+    # 2. Dynamic DB keys
+    db_keys = SecurityStorage.get_all_keys()
+    for name, key_data in db_keys.items():
+        keys.append({
+            "name": name,
+            "source": "sqlite",
+            "mode": key_data["mode"],
+            "db_scope": key_data["db_scope"],
+            "fs_scope": key_data["fs_scope"],
+            "rate_limit_override": key_data["rate_limit_override"],
+            "full_admin": key_data["full_admin"]
+        })
+        
     return success_response(request, {"keys": keys})
 
 
@@ -45,22 +65,45 @@ async def create_api_key(
     mode = body.get("mode", "readwrite")
     db_scope = body.get("db_scope", ["*"])
     fs_scope = body.get("fs_scope", ["*"])
+    rate_limit = body.get("rate_limit_override", 0)
+    full_admin = body.get("full_admin", False)
 
     if not name:
         raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "Key name is required", 400)
 
-    # Generate a cryptographically secure key
-    raw_secret = secrets.token_urlsafe(48)
+    if SecurityStorage.get_api_key(name):
+        raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, "Key name already exists", 400)
 
-    # NOTE: In a full implementation this would write to the config file.
-    # Here we return the generated secret for the caller to add to config.
+    # Generate a cryptographically secure key (32-64 chars A-Z, a-z, 0-9)
+    alphabet = string.ascii_letters + string.digits
+    length = secrets.choice(range(32, 65))
+    raw_secret = ''.join(secrets.choice(alphabet) for _ in range(length))
+
+    # Hash secret for DB storage
+    secret_hash = hashlib.sha256(raw_secret.encode("utf-8")).hexdigest()
+    
+    await SecurityStorage.add_api_key(
+        name=name,
+        secret_hash=secret_hash,
+        mode=mode,
+        db_scope=db_scope,
+        fs_scope=fs_scope,
+        rate_limit=rate_limit,
+        full_admin=full_admin
+    )
+
+    import base64
+    bearer = base64.b64encode(f"{name}:{raw_secret}".encode()).decode()
+
     return success_response(request, {
         "name": name,
-        "secret": raw_secret,
         "mode": mode,
         "db_scope": db_scope,
         "fs_scope": fs_scope,
-        "note": "Add this key to your config.toml under [api_key.<name>]",
+        "rate_limit_override": rate_limit,
+        "secret": raw_secret,
+        "bearer_token": bearer,
+        "note": "Store this token now. The raw secret is not retrievable."
     })
 
 
@@ -71,12 +114,21 @@ async def revoke_api_key(
     auth=Depends(require_admin),
 ):
     config = ConfigManager.get()
-    if key_name not in config.api_key:
+    
+    # DB Keys
+    deleted_from_db = await SecurityStorage.delete_api_key(key_name)
+    
+    # If it's a static key, we can't delete it from file automatically, so we ban it
+    banned = False
+    if key_name in config.api_key:
+        await BanList.ban_key(key_name, reason="Revoked via admin API", duration_seconds=None)
+        banned = True
+        
+    if not deleted_from_db and not banned:
         raise NexusGateException(ErrorCodes.AUTH_INVALID_KEY, f"Key '{key_name}' not found", 404)
 
-    # Ban the key immediately so it can't be used even before config reload
-    BanList.ban_key(key_name, reason="Revoked via admin API", duration_seconds=None)
-    return success_response(request, {"revoked": key_name, "note": "Also remove from config.toml to persist"})
+    msg = "Revoked from SQLite database." if deleted_from_db else "Banned static key (remove from config.toml to persist)."
+    return success_response(request, {"revoked": key_name, "note": msg})
 
 
 # ─── Ban Management ───────────────────────────────────────────────────────────
@@ -95,13 +147,13 @@ async def ban_ip(request: Request, body: dict = Body(...), auth=Depends(require_
     if not ip:
         raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "IP address is required", 400)
 
-    BanList.ban_ip(ip, reason=reason, duration_seconds=duration)
+    await BanList.ban_ip(ip, reason=reason, duration_seconds=duration)
     return success_response(request, {"banned_ip": ip, "reason": reason, "duration_seconds": duration})
 
 
 @router.delete("/bans/ip/{ip}")
 async def unban_ip(request: Request, ip: str = Path(...), auth=Depends(require_admin)):
-    removed = BanList.unban_ip(ip)
+    removed = await BanList.unban_ip(ip)
     if not removed:
         raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"IP '{ip}' is not banned", 404)
     return success_response(request, {"unbanned_ip": ip})
@@ -116,13 +168,13 @@ async def ban_key(request: Request, body: dict = Body(...), auth=Depends(require
     if not key_name:
         raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "key_name is required", 400)
 
-    BanList.ban_key(key_name, reason=reason, duration_seconds=duration)
+    await BanList.ban_key(key_name, reason=reason, duration_seconds=duration)
     return success_response(request, {"banned_key": key_name, "reason": reason})
 
 
 @router.delete("/bans/key/{key_name}")
 async def unban_key(request: Request, key_name: str = Path(...), auth=Depends(require_admin)):
-    removed = BanList.unban_key(key_name)
+    removed = await BanList.unban_key(key_name)
     if not removed:
         raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"Key '{key_name}' is not banned", 404)
     return success_response(request, {"unbanned_key": key_name})
@@ -141,12 +193,40 @@ async def reset_circuit_breaker(
     key: str = Path(...),
     auth=Depends(require_admin),
 ):
-    from security.circuit_breaker import CircuitState
-    if key in CircuitBreaker._circuits:
-        CircuitBreaker._circuits[key]["state"] = CircuitState.CLOSED
-        CircuitBreaker._circuits[key]["failures"] = 0
-        CircuitBreaker._circuits[key]["successes"] = 0
+    await CircuitBreaker.reset(key)
     return success_response(request, {"reset": key, "state": "closed"})
+
+
+# ─── Ext Management view (Databases, Webhooks) ──────────────────────────────────────────────────
+
+@router.get("/databases")
+async def view_databases(request: Request, auth=Depends(require_admin)):
+    """Safe view of configured databases, omitting URLs"""
+    config = ConfigManager.get()
+    dbs = {}
+    for name, db_cfg in config.database.items():
+        dbs[name] = {
+            "engine": db_cfg.engine.value,
+            "mode": db_cfg.mode.value,
+            "pool_min": db_cfg.pool_min,
+            "pool_max": db_cfg.pool_max,
+            "url": "***REDACTED***"
+        }
+    return success_response(request, {"databases": dbs})
+
+@router.get("/webhooks")
+async def view_webhooks(request: Request, auth=Depends(require_admin)):
+    """Safe view of configured webhooks, omitting secrets"""
+    config = ConfigManager.get()
+    wh = {}
+    for name, hook in config.webhook.items():
+        wh[name] = {
+            "url": hook.url,
+            "rule": hook.rule,
+            "enabled": hook.enabled,
+            "secret": "***REDACTED***"
+        }
+    return success_response(request, {"webhooks": wh})
 
 
 # ─── Live Config View ─────────────────────────────────────────────────────────
@@ -154,14 +234,18 @@ async def reset_circuit_breaker(
 @router.get("/config")
 async def view_config(request: Request, auth=Depends(require_admin)):
     config = ConfigManager.get()
-    # Mask secrets before returning
     data = config.model_dump()
+    
+    # Mask secrets
     for key_name in data.get("api_key", {}):
         data["api_key"][key_name]["secret"] = "***REDACTED***"
     for wh_name in data.get("webhook", {}):
         data["webhook"][wh_name]["secret"] = "***REDACTED***"
+    for db_name in data.get("database", {}):
+        data["database"][db_name]["url"] = "***REDACTED***"
     for srv_name in data.get("federation", {}).get("server", {}):
         data["federation"]["server"][srv_name]["api_key"] = "***REDACTED***"
+        
     return success_response(request, {"config": data})
 
 
@@ -170,11 +254,18 @@ async def view_config(request: Request, auth=Depends(require_admin)):
 @router.get("/rate-limits")
 async def view_rate_limits(request: Request, auth=Depends(require_admin)):
     config = ConfigManager.get()
-    overrides = {
-        name: {"rate_limit_override": cfg.rate_limit_override}
-        for name, cfg in config.api_key.items()
-        if cfg.rate_limit_override > 0
-    }
+    overrides = {}
+    
+    # Static keys
+    for name, cfg in config.api_key.items():
+        if cfg.rate_limit_override > 0:
+            overrides[name] = {"rate_limit_override": cfg.rate_limit_override, "source": "config"}
+            
+    # Dynamic keys
+    for name, cfg in SecurityStorage.get_all_keys().items():
+        if cfg["rate_limit_override"] > 0:
+            overrides[name] = {"rate_limit_override": cfg["rate_limit_override"], "source": "sqlite"}
+            
     return success_response(request, {
         "global": {
             "window": config.rate_limit.window,

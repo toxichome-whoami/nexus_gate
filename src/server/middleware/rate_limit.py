@@ -47,8 +47,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         limit = config.rate_limit.max_requests
         window = config.rate_limit.window
         
-        if api_key_name != "anonymous" and api_key_name in config.api_key:
-            override = config.api_key[api_key_name].rate_limit_override
+        if api_key_name != "anonymous":
+            from security.storage import SecurityStorage
+            override = 0
+            
+            # Check dynamic key
+            db_key = SecurityStorage.get_api_key(api_key_name)
+            if db_key:
+                override = db_key.get("rate_limit_override", 0)
+            elif api_key_name in config.api_key:
+                override = config.api_key[api_key_name].rate_limit_override
+                
             if override > 0:
                 limit = override
 

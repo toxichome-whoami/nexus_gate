@@ -1,93 +1,50 @@
 """
-Ban List: Persistent (in-memory, optionally Redis-backed) ban/unban registry
+Ban List: Persistent (SQLite-backed, cached) ban/unban registry
 for IP addresses and API key names.
 """
 import time
 import structlog
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple
+
+from security.storage import SecurityStorage
 
 logger = structlog.get_logger()
 
-class BanEntry:
-    def __init__(self, reason: str, expires_at: Optional[float] = None):
-        self.reason = reason
-        self.created_at = time.time()
-        self.expires_at = expires_at
-
-    def is_expired(self) -> bool:
-        if self.expires_at is None:
-            return False
-        return time.time() > self.expires_at
-
-    def to_dict(self) -> dict:
-        return {
-            "reason": self.reason,
-            "created_at": self.created_at,
-            "expires_at": self.expires_at,
-            "permanent": self.expires_at is None,
-        }
-
 class BanList:
-    """Thread-safe in-memory ban registry for IPs and API keys."""
-
-    _ip_bans: Dict[str, BanEntry] = {}
-    _key_bans: Dict[str, BanEntry] = {}
+    """High-performance cache-aside ban registry for IPs and API keys."""
 
     @classmethod
-    def ban_ip(cls, ip: str, reason: str, duration_seconds: Optional[int] = None):
-        expires_at = time.time() + duration_seconds if duration_seconds else None
-        cls._ip_bans[ip] = BanEntry(reason, expires_at)
+    async def ban_ip(cls, ip: str, reason: str, duration_seconds: Optional[int] = None):
+        await SecurityStorage.ban_entity('ip', ip, reason, duration_seconds)
         logger.warning("IP banned", ip=ip, reason=reason, duration=duration_seconds)
 
     @classmethod
-    def unban_ip(cls, ip: str) -> bool:
-        if ip in cls._ip_bans:
-            del cls._ip_bans[ip]
+    async def unban_ip(cls, ip: str) -> bool:
+        result = await SecurityStorage.unban_entity('ip', ip)
+        if result:
             logger.info("IP unbanned", ip=ip)
-            return True
-        return False
+        return result
 
     @classmethod
     def is_ip_banned(cls, ip: str) -> Tuple[bool, Optional[str]]:
-        entry = cls._ip_bans.get(ip)
-        if entry is None:
-            return False, None
-        if entry.is_expired():
-            del cls._ip_bans[ip]
-            return False, None
-        return True, entry.reason
+        return SecurityStorage.check_ban('ip', ip)
 
     @classmethod
-    def ban_key(cls, key_name: str, reason: str, duration_seconds: Optional[int] = None):
-        expires_at = time.time() + duration_seconds if duration_seconds else None
-        cls._key_bans[key_name] = BanEntry(reason, expires_at)
+    async def ban_key(cls, key_name: str, reason: str, duration_seconds: Optional[int] = None):
+        await SecurityStorage.ban_entity('key', key_name, reason, duration_seconds)
         logger.warning("API key banned", key_name=key_name, reason=reason)
 
     @classmethod
-    def unban_key(cls, key_name: str) -> bool:
-        if key_name in cls._key_bans:
-            del cls._key_bans[key_name]
+    async def unban_key(cls, key_name: str) -> bool:
+        result = await SecurityStorage.unban_entity('key', key_name)
+        if result:
             logger.info("API key unbanned", key_name=key_name)
-            return True
-        return False
+        return result
 
     @classmethod
     def is_key_banned(cls, key_name: str) -> Tuple[bool, Optional[str]]:
-        entry = cls._key_bans.get(key_name)
-        if entry is None:
-            return False, None
-        if entry.is_expired():
-            del cls._key_bans[key_name]
-            return False, None
-        return True, entry.reason
+        return SecurityStorage.check_ban('key', key_name)
 
     @classmethod
     def list_bans(cls) -> dict:
-        # GC expired bans first
-        cls._ip_bans = {k: v for k, v in cls._ip_bans.items() if not v.is_expired()}
-        cls._key_bans = {k: v for k, v in cls._key_bans.items() if not v.is_expired()}
-
-        return {
-            "ip_bans": {ip: entry.to_dict() for ip, entry in cls._ip_bans.items()},
-            "key_bans": {k: entry.to_dict() for k, entry in cls._key_bans.items()},
-        }
+        return SecurityStorage.list_bans()
