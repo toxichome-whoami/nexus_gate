@@ -90,8 +90,9 @@ async def list_storages(request: Request, auth: AuthContext = Depends(get_auth_c
                         for fs in fs_data:
                             if fs.get("federated"): continue
                             fs_name = fs.get("name")
+                            health_status = remote_storages.get(fs_name, {})
                             new_storages[fs_name] = {
-                                "status": remote_storages.get(fs_name, "available"),
+                                "status": health_status.get("status", "available") if isinstance(health_status, dict) else health_status,
                                 "mode": fs.get("mode", "proxy"),
                                 "limit": fs.get("limit", "10GB"),
                                 "chunk_size": fs.get("chunk_size", "10MB"),
@@ -105,10 +106,11 @@ async def list_storages(request: Request, auth: AuthContext = Depends(get_auth_c
                 fed_name = f"{alias}_{storage_name}"
                 if "*" in auth.fs_scope or fed_name in auth.fs_scope:
                     is_dict = isinstance(storage_status, dict)
+                    raw_status = storage_status.get("status", "available") if is_dict else storage_status
                     storages.append({
                         "name": fed_name,
                         "mode": storage_status.get("mode", "proxy") if is_dict else "proxy",
-                        "status": storage_status.get("status", "available") if is_dict else ("available" if storage_status == "up" else storage_status),
+                        "status": "available" if raw_status == "up" else raw_status,
                         "limit": storage_status.get("limit", "10GB") if is_dict else "10GB",
                         "chunk_size": storage_status.get("chunk_size", "10MB") if is_dict else "10MB",
                         "max_file_size": storage_status.get("max_file_size", "100MB") if is_dict else "100MB",
