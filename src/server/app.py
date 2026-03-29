@@ -13,6 +13,12 @@ from server.middleware.cors import setup_cors
 from server.middleware.rate_limit import RateLimitMiddleware
 from server.middleware.idempotency import IdempotencyMiddleware
 
+# Routers
+from api.core import health
+from api.core.metrics import router as metrics_router
+from api import database, storage, federation
+from api.admin import router as admin_router
+
 def create_app() -> FastAPI:
     config = ConfigManager.get()
 
@@ -21,10 +27,28 @@ def create_app() -> FastAPI:
         description="Industrial-Grade Unified API Gateway",
         version="1.0.0",
         lifespan=lifespan,
-        docs_url="/api/docs" if config.features.playground else None,
+        docs_url="/api/docs",
         redoc_url=None,
         openapi_url="/api/spec",
     )
+
+    @app.middleware("http")
+    async def dynamic_playground_middleware(request, call_next):
+        path = request.url.path
+        if path.startswith("/api/docs") or path.startswith("/api/spec"):
+            cfg = ConfigManager.get()
+            if not cfg.features.playground:
+                return JSONResponse(
+                    status_code=404,
+                    content={
+                        "success": False,
+                        "error": {
+                            "code": "FEATURE_DISABLED",
+                            "message": "Playground is currently disabled"
+                        }
+                    }
+                )
+        return await call_next(request)
 
     # Middleware stack — added in reverse execution order
     # Innermost (runs last): SecurityHeaders
@@ -36,12 +60,6 @@ def create_app() -> FastAPI:
     setup_cors(app)
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
-
-    # Routers
-    from api.core import health
-    from api.core.metrics import router as metrics_router
-    from api import database, storage, federation
-    from api.admin import router as admin_router
 
     app.include_router(health.router)
     app.include_router(metrics_router)
