@@ -1,5 +1,9 @@
 import json
+import httpx
+import base64
+import asyncio
 from fastapi import APIRouter, Depends, Request, Query, Path
+from api.federation.sync import FederationState
 from pydantic import ValidationError
 
 from config.loader import ConfigManager
@@ -62,12 +66,39 @@ async def list_databases(request: Request, auth: AuthContext = Depends(get_auth_
 
     # Append federated databases from synced remote servers
     if config.features.federation and config.federation.enabled:
-        from api.federation.sync import FederationState
         state = FederationState()
-        for alias, srv_state in state.servers.items():
-            if srv_state.get("status") != "up":
-                continue
-            for db_name, db_info in srv_state.get("databases", {}).items():
+        
+        async def fetch_remote_dbs(alias, srv_state):
+            if srv_state.get("status") != "up" or alias not in config.federation.server:
+                return
+                
+            srv_config = config.federation.server[alias]
+            databases = srv_state.get("databases", {})
+            
+            try:
+                url = srv_config.url.rstrip("/")
+                encoded_secret = base64.b64encode(srv_config.secret.encode("utf-8")).decode("utf-8")
+                headers = {"X-Federation-Secret": encoded_secret, "X-Federation-Node": srv_config.node_id}
+                
+                async with httpx.AsyncClient(verify=srv_config.trust_mode == "verify", timeout=5) as client:
+                    resp = await client.get(f"{url}/api/db/databases", headers=headers)
+                    if resp.status_code == 200:
+                        remote_dbs = resp.json().get("data", {}).get("databases", [])
+                        new_databases = {}
+                        for db in remote_dbs:
+                            if db.get("federated"): continue
+                            db_name = db.get("name")
+                            new_databases[db_name] = {
+                                "status": databases.get(db_name, "up"),
+                                "engine": db.get("engine", "unknown"),
+                                "mode": db.get("mode", "unknown"),
+                                "tables_count": db.get("tables_count", 0)
+                            }
+                        databases = new_databases
+            except Exception:
+                pass
+                
+            for db_name, db_info in databases.items():
                 fed_name = f"{alias}_{db_name}"
                 if "*" in auth.db_scope or fed_name in auth.db_scope:
                     dbs.append({
@@ -79,6 +110,10 @@ async def list_databases(request: Request, auth: AuthContext = Depends(get_auth_
                         "federated": True,
                         "remote_server": alias,
                     })
+                    
+        tasks = [fetch_remote_dbs(alias, srv_state) for alias, srv_state in state.servers.items()]
+        if tasks:
+            await asyncio.gather(*tasks)
 
     return success_response(request, {"databases": dbs})
 

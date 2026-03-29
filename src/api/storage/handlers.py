@@ -1,5 +1,9 @@
 import os
+import httpx
+import base64
+import asyncio
 from fastapi import APIRouter, Depends, Request, Query, Path
+from api.federation.sync import FederationState
 from typing import Optional, List
 
 from config.loader import ConfigManager
@@ -64,21 +68,57 @@ async def list_storages(request: Request, auth: AuthContext = Depends(get_auth_c
 
     # Append federated storages from synced remote servers
     if config.features.federation and config.federation.enabled:
-        from api.federation.sync import FederationState
         state = FederationState()
-        for alias, srv_state in state.servers.items():
-            if srv_state.get("status") != "up":
-                continue
-            for storage_name, storage_status in srv_state.get("storages", {}).items():
+        
+        async def fetch_remote_storages(alias, srv_state):
+            if srv_state.get("status") != "up" or alias not in config.federation.server:
+                return
+                
+            srv_config = config.federation.server[alias]
+            remote_storages = srv_state.get("storages", {})
+            
+            try:
+                url = srv_config.url.rstrip("/")
+                encoded_secret = base64.b64encode(srv_config.secret.encode("utf-8")).decode("utf-8")
+                headers = {"X-Federation-Secret": encoded_secret, "X-Federation-Node": srv_config.node_id}
+                
+                async with httpx.AsyncClient(verify=srv_config.trust_mode == "verify", timeout=5) as client:
+                    resp = await client.get(f"{url}/api/fs/storages", headers=headers)
+                    if resp.status_code == 200:
+                        fs_data = resp.json().get("data", {}).get("storages", [])
+                        new_storages = {}
+                        for fs in fs_data:
+                            if fs.get("federated"): continue
+                            fs_name = fs.get("name")
+                            new_storages[fs_name] = {
+                                "status": remote_storages.get(fs_name, "available"),
+                                "mode": fs.get("mode", "proxy"),
+                                "limit": fs.get("limit", "10GB"),
+                                "chunk_size": fs.get("chunk_size", "10MB"),
+                                "max_file_size": fs.get("max_file_size", "100MB"),
+                            }
+                        remote_storages = new_storages
+            except Exception:
+                pass
+                
+            for storage_name, storage_status in remote_storages.items():
                 fed_name = f"{alias}_{storage_name}"
                 if "*" in auth.fs_scope or fed_name in auth.fs_scope:
+                    is_dict = isinstance(storage_status, dict)
                     storages.append({
                         "name": fed_name,
-                        "mode": "proxy",
-                        "status": storage_status if isinstance(storage_status, str) else "available",
+                        "mode": storage_status.get("mode", "proxy") if is_dict else "proxy",
+                        "status": storage_status.get("status", "available") if is_dict else ("available" if storage_status == "up" else storage_status),
+                        "limit": storage_status.get("limit", "10GB") if is_dict else "10GB",
+                        "chunk_size": storage_status.get("chunk_size", "10MB") if is_dict else "10MB",
+                        "max_file_size": storage_status.get("max_file_size", "100MB") if is_dict else "100MB",
                         "federated": True,
                         "remote_server": alias,
                     })
+
+        tasks = [fetch_remote_storages(alias, srv_state) for alias, srv_state in state.servers.items()]
+        if tasks:
+            await asyncio.gather(*tasks)
 
     return success_response(request, {"storages": storages})
 

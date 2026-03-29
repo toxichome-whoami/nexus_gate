@@ -78,7 +78,7 @@ async def proxy_request(alias: str, path: str, request: Request, is_database: bo
                     }
                     
                     return StreamingResponse(
-                        resp.aiter_raw(),
+                        resp.aiter_bytes(),
                         status_code=resp.status_code,
                         headers=pass_headers
                     )
