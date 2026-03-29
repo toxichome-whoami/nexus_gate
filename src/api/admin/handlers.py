@@ -17,6 +17,8 @@ from config.loader import ConfigManager
 from security.ban_list import BanList
 from security.circuit_breaker import CircuitBreaker
 from security.storage import SecurityStorage
+from db.pool import DatabasePoolManager
+from db.pool import DatabasePoolManager
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -219,6 +221,29 @@ async def view_databases(request: Request, auth=Depends(require_admin)):
         }
     return success_response(request, {"databases": dbs})
 
+@router.post("/databases")
+async def create_database(request: Request, body: dict = Body(...), auth=Depends(require_admin)):
+    name = body.get("name")
+    if not name:
+        raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "Database name requires", 400)
+
+    await SecurityStorage.add_dynamic_database(name, body)
+
+    # If it was already loaded, hot-reload the pool
+    await DatabasePoolManager.remove_engine(name)
+
+    return success_response(request, {"created_database": name, "note": "Database added dynamically to SQLite backend."})
+
+@router.delete("/databases/{name}")
+async def delete_database(request: Request, name: str = Path(...), auth=Depends(require_admin)):
+    removed = await SecurityStorage.delete_dynamic_database(name)
+    if not removed:
+        raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"Dynamic Database '{name}' not found", 404)
+
+    await DatabasePoolManager.remove_engine(name)
+
+    return success_response(request, {"deleted_database": name})
+
 @router.get("/webhooks")
 async def view_webhooks(request: Request, auth=Depends(require_admin)):
     """Safe view of configured webhooks, omitting secrets"""
@@ -232,6 +257,23 @@ async def view_webhooks(request: Request, auth=Depends(require_admin)):
             "secret": "***REDACTED***"
         }
     return success_response(request, {"webhooks": wh})
+
+@router.post("/webhooks")
+async def create_webhook(request: Request, body: dict = Body(...), auth=Depends(require_admin)):
+    name = body.get("name")
+    if not name:
+        raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "Webhook name required", 400)
+
+    await SecurityStorage.add_dynamic_webhook(name, body)
+    return success_response(request, {"created_webhook": name})
+
+@router.delete("/webhooks/{name}")
+async def delete_webhook(request: Request, name: str = Path(...), auth=Depends(require_admin)):
+    removed = await SecurityStorage.delete_dynamic_webhook(name)
+    if not removed:
+        raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"Dynamic Webhook '{name}' not found", 404)
+
+    return success_response(request, {"deleted_webhook": name})
 
 
 # ─── Live Config View ─────────────────────────────────────────────────────────

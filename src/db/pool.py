@@ -56,3 +56,10 @@ class DatabasePoolManager:
             logger.info("Closing pool", alias=alias)
             await engine.disconnect()
         cls._engines.clear()
+
+    @classmethod
+    async def remove_engine(cls, alias: str):
+        if alias in cls._engines:
+            engine = cls._engines.pop(alias)
+            logger.info("Closing pool for dynamically removed database", alias=alias)
+            await engine.disconnect()

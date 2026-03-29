@@ -304,14 +304,54 @@ curl -X GET "http://localhost:4500/api/admin/databases" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
-### 13. List Webhook Regulations
+### 13. Create Dynamic Database
+```bash
+curl -X POST "http://localhost:4500/api/admin/databases" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "name": "secondary_db",
+           "engine": "postgres",
+           "url": "postgresql://user:pass@localhost:5432/db",
+           "mode": "readonly",
+           "dangerous_operations": false
+         }'
+```
+
+### 14. Delete Dynamic Database
+```bash
+curl -X DELETE "http://localhost:4500/api/admin/databases/secondary_db" \
+     -H "Authorization: Bearer <TOKEN>"
+```
+
+### 15. List Webhook Regulations
 Safe mode without viewing HMAC Secrets.
 ```bash
 curl -X GET "http://localhost:4500/api/admin/webhooks" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
-### 14. View Configuration Rate Limit Overrides
+### 16. Create Dynamic Webhook
+```bash
+curl -X POST "http://localhost:4500/api/admin/webhooks" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "name": "audit_hook",
+           "url": "http://example.com/api/intercept",
+           "secret": "mySuperSecretHmacKey123!",
+           "rule": "db.delete@main_db:*",
+           "enabled": true
+         }'
+```
+
+### 17. Delete Dynamic Webhook
+```bash
+curl -X DELETE "http://localhost:4500/api/admin/webhooks/audit_hook" \
+     -H "Authorization: Bearer <TOKEN>"
+```
+
+### 18. View Configuration Rate Limit Overrides
 ```bash
 curl -X GET "http://localhost:4500/api/admin/rate-limits" \
      -H "Authorization: Bearer <TOKEN>"

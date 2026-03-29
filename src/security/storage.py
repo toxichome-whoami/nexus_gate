@@ -5,6 +5,9 @@ import asyncio
 import aiosqlite
 import structlog
 from typing import Dict, Any, Optional, List, Tuple
+from config.loader import ConfigManager
+from config.schema import DatabaseDefConfig, WebhookDefConfig
+import json
 
 logger = structlog.get_logger()
 
@@ -15,7 +18,7 @@ DB_PATH = os.path.join(DB_DIR, "security.db")
 class SecurityStorage:
     _instance = None
     _lock = asyncio.Lock()
-    
+
     # In-Memory Cache (Ultra-Fast layer for auth/bans)
     _api_keys_cache: Dict[str, dict] = {}
     _bans_cache_ip: Dict[str, dict] = {}
@@ -69,15 +72,40 @@ class SecurityStorage:
                         tripped_at REAL
                     )
                 ''')
+                # Dynamic Databases table
+                await db.execute('''
+                    CREATE TABLE IF NOT EXISTS dynamic_databases (
+                        name TEXT PRIMARY KEY,
+                        engine TEXT NOT NULL,
+                        url TEXT NOT NULL,
+                        mode TEXT NOT NULL,
+                        pool_min INTEGER DEFAULT 2,
+                        pool_max INTEGER DEFAULT 20,
+                        connection_timeout INTEGER DEFAULT 5,
+                        idle_timeout INTEGER DEFAULT 300,
+                        max_lifetime INTEGER DEFAULT 1800,
+                        dangerous_operations BOOLEAN DEFAULT 0
+                    )
+                ''')
+                # Dynamic Webhooks table
+                await db.execute('''
+                    CREATE TABLE IF NOT EXISTS dynamic_webhooks (
+                        name TEXT PRIMARY KEY,
+                        url TEXT NOT NULL,
+                        secret TEXT NOT NULL,
+                        rule TEXT NOT NULL,
+                        enabled BOOLEAN DEFAULT 1
+                    )
+                ''')
                 await db.commit()
-            
+
             # Load cache fully to memory for 0ms latency
             await cls._reload_caches()
             logger.info("Security database initialized and caches loaded.", path=DB_PATH)
 
     @classmethod
     async def _reload_caches(cls):
-        """Load all entries into memory cache."""
+        """Load all entries into memory cache and inject configs."""
         async with aiosqlite.connect(DB_PATH) as db:
             # 1. API Keys
             cls._api_keys_cache.clear()
@@ -88,7 +116,7 @@ class SecurityStorage:
                         fs_scope = json.loads(row[4])
                     except Exception:
                         db_scope, fs_scope = ["*"], ["*"]
-                        
+
                     cls._api_keys_cache[row[0]] = {
                         "secret_hash": row[1],
                         "mode": row[2],
@@ -106,7 +134,7 @@ class SecurityStorage:
                     exp = row[3]
                     if exp is not None and now > exp:
                         continue # Expired, don't load. Will be lazily GC'd later.
-                        
+
                     entry = {"reason": row[2], "expires_at": exp}
                     if row[0] == 'ip':
                         cls._bans_cache_ip[row[1]] = entry
@@ -125,6 +153,23 @@ class SecurityStorage:
                         "tripped_at": row[5]
                     }
 
+            # 4. Synchronize Databases & Webhooks directly into ConfigManager memory
+            config = ConfigManager.get()
+
+            async with db.execute('SELECT name, engine, url, mode, pool_min, pool_max, connection_timeout, idle_timeout, max_lifetime, dangerous_operations FROM dynamic_databases') as cursor:
+                async for row in cursor:
+                    config.database[row[0]] = DatabaseDefConfig(
+                        engine=row[1], url=row[2], mode=row[3], pool_min=row[4], pool_max=row[5],
+                        connection_timeout=row[6], idle_timeout=row[7], max_lifetime=row[8],
+                        dangerous_operations=bool(row[9])
+                    )
+
+            async with db.execute('SELECT name, url, secret, rule, enabled FROM dynamic_webhooks') as cursor:
+                async for row in cursor:
+                    config.webhook[row[0]] = WebhookDefConfig(
+                        url=row[1], secret=row[2], rule=row[3], enabled=bool(row[4])
+                    )
+
     # -- API KEY METHODS --
     @classmethod
     async def add_api_key(cls, name: str, secret_hash: str, mode: str, db_scope: list, fs_scope: list, rate_limit: int):
@@ -135,7 +180,7 @@ class SecurityStorage:
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (name, secret_hash, mode, json.dumps(db_scope), json.dumps(fs_scope), rate_limit, time.time()))
             await db.commit()
-            
+
         cls._api_keys_cache[name] = {
             "secret_hash": secret_hash,
             "mode": mode,
@@ -166,7 +211,7 @@ class SecurityStorage:
     @classmethod
     async def ban_entity(cls, entity_type: str, identifier: str, reason: str, duration_seconds: Optional[int] = None):
         expires_at = time.time() + duration_seconds if duration_seconds else None
-        
+
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('''
                 INSERT OR REPLACE INTO bans
@@ -186,7 +231,7 @@ class SecurityStorage:
         async with aiosqlite.connect(DB_PATH) as db:
             cursor = await db.execute('DELETE FROM bans WHERE type = ? AND identifier = ?', (entity_type, identifier))
             await db.commit()
-            
+
             if cursor.rowcount > 0:
                 if entity_type == 'ip':
                     cls._bans_cache_ip.pop(identifier, None)
@@ -199,16 +244,16 @@ class SecurityStorage:
     def check_ban(cls, entity_type: str, identifier: str) -> Tuple[bool, Optional[str]]:
         cache = cls._bans_cache_ip if entity_type == 'ip' else cls._bans_cache_key
         entry = cache.get(identifier)
-        
+
         if not entry:
             return False, None
-            
+
         if entry["expires_at"] is not None and time.time() > entry["expires_at"]:
             # Expired in cache, we lazily rely on background cleanup or just pop it
             cache.pop(identifier, None)
             asyncio.create_task(cls.unban_entity(entity_type, identifier)) # Async cleanup
             return False, None
-            
+
         return True, entry["reason"]
 
     @classmethod
@@ -225,14 +270,14 @@ class SecurityStorage:
         """Persist circuit breaker changes. Fired asynchronously in background to not slow latency."""
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('''
-                INSERT OR REPLACE INTO circuit_breakers 
-                (key, state, failures, successes, last_failure_time, tripped_at) 
+                INSERT OR REPLACE INTO circuit_breakers
+                (key, state, failures, successes, last_failure_time, tripped_at)
                 VALUES (?, ?, ?, ?, ?, ?)
             ''', (key, state, failures, successes, last_failure_time, tripped_at))
             await db.commit()
-            
+
         cls._circuit_breakers_cache[key] = {
-            "state": state, "failures": failures, "successes": successes, 
+            "state": state, "failures": failures, "successes": successes,
             "last_failure_time": last_failure_time, "tripped_at": tripped_at
         }
 
@@ -248,3 +293,54 @@ class SecurityStorage:
     @classmethod
     def get_all_circuits(cls) -> Dict[str, dict]:
         return cls._circuit_breakers_cache
+
+    # -- DYNAMIC CONFIGURATION (Databases / Webhooks) METHODS --
+    @classmethod
+    async def add_dynamic_database(cls, name: str, cfg: dict):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('''
+                INSERT OR REPLACE INTO dynamic_databases
+                (name, engine, url, mode, pool_min, pool_max, connection_timeout, idle_timeout, max_lifetime, dangerous_operations)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                name, cfg["engine"], cfg["url"], cfg.get("mode", "readwrite"),
+                cfg.get("pool_min", 2), cfg.get("pool_max", 20), cfg.get("connection_timeout", 5),
+                cfg.get("idle_timeout", 300), cfg.get("max_lifetime", 1800), int(cfg.get("dangerous_operations", False))
+            ))
+            await db.commit()
+        await cls._reload_caches() # Force config remap
+
+    @classmethod
+    async def delete_dynamic_database(cls, name: str) -> bool:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute('DELETE FROM dynamic_databases WHERE name = ?', (name,))
+            await db.commit()
+            if cursor.rowcount > 0:
+                config = ConfigManager.get()
+                if name in config.database:
+                    del config.database[name]
+                return True
+        return False
+
+    @classmethod
+    async def add_dynamic_webhook(cls, name: str, cfg: dict):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('''
+                INSERT OR REPLACE INTO dynamic_webhooks
+                (name, url, secret, rule, enabled)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (name, cfg["url"], cfg["secret"], cfg["rule"], int(cfg.get("enabled", True))))
+            await db.commit()
+        await cls._reload_caches()
+
+    @classmethod
+    async def delete_dynamic_webhook(cls, name: str) -> bool:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute('DELETE FROM dynamic_webhooks WHERE name = ?', (name,))
+            await db.commit()
+            if cursor.rowcount > 0:
+                config = ConfigManager.get()
+                if name in config.webhook:
+                    del config.webhook[name]
+                return True
+        return False
