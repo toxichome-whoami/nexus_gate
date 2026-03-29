@@ -9,176 +9,322 @@ All endpoints (except `/health` and `/ready`) require Bearer token authenticatio
 Authorization: Bearer base64(<key_name>:<secret>)
 ```
 
-**Python example:**
-```python
-import base64, requests
+**cURL Example:**
+```bash
+# To generate the token in bash:
+# TOKEN=$(echo -n "admin:your_secret_here" | base64)
 
-token = base64.b64encode(b"admin:your_secret_here").decode()
-headers = {"Authorization": f"Bearer {token}"}
+curl -X GET "http://localhost:4500/api/db/databases" \
+     -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
 
 ## Core Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/` | Server info & feature flags |
-| GET | `/ready` | Kubernetes readiness probe |
-| GET | `/health` | Deep health of all subsystems |
-| GET | `/metrics` | OpenMetrics/Prometheus metrics |
-| GET | `/api/spec` | OpenAPI JSON spec |
+### 1. Server Info & Feature Flags
+```bash
+curl -X GET "http://localhost:4500/" \
+     -H "Authorization: Bearer <TOKEN>"
+```
+
+### 2. Kubernetes Readiness Probe
+Does not require authentication.
+```bash
+curl -X GET "http://localhost:4500/ready"
+```
+
+### 3. Deep Health Check
+```bash
+curl -X GET "http://localhost:4500/health" \
+     -H "Authorization: Bearer <TOKEN>"
+```
+
+### 4. Metrics (Prometheus)
+```bash
+curl -X GET "http://localhost:4500/metrics" \
+     -H "Authorization: Bearer <TOKEN>"
+```
+
+### 5. OpenAPI JSON Spec
+```bash
+curl -X GET "http://localhost:4500/api/spec" \
+     -H "Authorization: Bearer <TOKEN>"
+```
 
 ---
 
 ## Database API `/api/db`
 
-### List Databases
-```
-GET /api/db/databases
-```
-
-### List Tables
-```
-GET /api/db/{db_name}/tables
+### 1. List Databases
+```bash
+curl -X GET "http://localhost:4500/api/db/databases" \
+     -H "Authorization: Bearer <TOKEN>"
 ```
 
-### Execute Raw SQL
-```
-POST /api/db/{db_name}/query
-Content-Type: application/json
-
-{
-  "sql": "SELECT * FROM users WHERE id = :id",
-  "params": {"id": 42}
-}
+### 2. List Tables
+```bash
+curl -X GET "http://localhost:4500/api/db/main_db/tables" \
+     -H "Authorization: Bearer <TOKEN>"
 ```
 
+### 3. Execute Raw SQL
 > [!CAUTION]
 > Raw SQL is validated by AST parser. Dangerous operations blocked per config.
 
-### Fetch Rows (with filtering)
-```
-GET /api/db/{db_name}/{table}/rows
-  ?page=1
-  &limit=50
-  &sort=created_at&order=desc
-  &filter={"active":true,"age":{"$gte":18}}
-  &fields=id,name,email
-```
-
-### Insert Rows
-```
-POST /api/db/{db_name}/{table}/rows
-{
-  "rows": [{"name": "Alice", "active": true}]
-}
+```bash
+curl -X POST "http://localhost:4500/api/db/main_db/query" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "sql": "SELECT * FROM users WHERE id = :id",
+           "params": {"id": 42}
+         }'
 ```
 
-### Update Rows
-```
-PUT /api/db/{db_name}/{table}/rows
-{
-  "filter": {"id": 42},
-  "update": {"active": false}
-}
+### 4. Fetch Rows (with filtering)
+```bash
+curl -G "http://localhost:4500/api/db/main_db/users/rows" \
+     -H "Authorization: Bearer <TOKEN>" \
+     --data-urlencode "page=1" \
+     --data-urlencode "limit=50" \
+     --data-urlencode "sort=created_at" \
+     --data-urlencode "order=desc" \
+     --data-urlencode 'filter={"active":true,"age":{"$gte":18}}' \
+     --data-urlencode "fields=id,name,email"
 ```
 
-### Delete Rows
+### 5. Insert Rows
+```bash
+curl -X POST "http://localhost:4500/api/db/main_db/users/rows" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "rows": [{"name": "Alice", "active": true}]
+         }'
 ```
-DELETE /api/db/{db_name}/{table}/rows
-{
-  "filter": {"id": 42}
-}
+
+### 6. Update Rows
+```bash
+curl -X PUT "http://localhost:4500/api/db/main_db/users/rows" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "filter": {"id": 42},
+           "update": {"active": false}
+         }'
+```
+
+### 7. Delete Rows
+```bash
+curl -X DELETE "http://localhost:4500/api/db/main_db/users/rows" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "filter": {"id": 42}
+         }'
 ```
 
 ---
 
 ## Storage API `/api/fs`
 
-### List Storages
-```
-GET /api/fs/storages
-```
-
-### List Folder
-```
-GET /api/fs/{alias}/list?path=/subfolder
+### 1. List Storages
+```bash
+curl -X GET "http://localhost:4500/api/fs/storages" \
+     -H "Authorization: Bearer <TOKEN>"
 ```
 
-### Download File
-```
-GET /api/fs/{alias}/download?path=/image.png&inline=true
-GET /api/fs/{alias}/download?path=/image.png&width=300&height=200
-GET /api/fs/{alias}/download?path=/folder  (auto-zips folder)
-```
-
-### Upload (Direct — small files)
-```
-POST /api/fs/{alias}/upload
-Content-Type: multipart/form-data
-
-action=direct
-path=/uploads/file.txt
-file=<binary>
+### 2. List Folder
+```bash
+curl -X GET "http://localhost:4500/api/fs/local_fs/list?path=/subfolder" \
+     -H "Authorization: Bearer <TOKEN>"
 ```
 
-### Upload (Chunked — large files)
-```
-# 1. Initiate
-POST /api/fs/{alias}/upload
-{"action":"initiate","filename":"video.mp4","path":"/uploads/video.mp4","total_size":104857600,"checksum_sha256":"abc123..."}
+### 3. Download File or Folder
+```bash
+# Inline view of a file
+curl -X GET "http://localhost:4500/api/fs/local_fs/download?path=/image.png&inline=true" \
+     -H "Authorization: Bearer <TOKEN>" -O
 
-# 2. Upload each chunk
-POST /api/fs/{alias}/upload
-Content-Type: multipart/form-data
-action=chunk&upload_id=upl_xxx&chunk_index=0&chunk_hash=sha256_of_chunk&file=<binary>
+# Download with image resizing
+curl -X GET "http://localhost:4500/api/fs/local_fs/download?path=/image.png&width=300&height=200" \
+     -H "Authorization: Bearer <TOKEN>" -o thumb.png
 
-# 3. Finalize
-POST /api/fs/{alias}/upload
-{"action":"finalize","upload_id":"upl_xxx"}
+# Download folder as ZIP archive automatically
+curl -X GET "http://localhost:4500/api/fs/local_fs/download?path=/reports_folder" \
+     -H "Authorization: Bearer <TOKEN>" -o reports.zip
 ```
 
-### File Actions
+### 4. Direct Upload (Small Files)
+```bash
+curl -X POST "http://localhost:4500/api/fs/local_fs/upload" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -F "action=direct" \
+     -F "path=/uploads/file.txt" \
+     -F "file=@/path/to/local/file.txt"
 ```
-POST /api/fs/{alias}/action
-{
-  "action": "rename",   // rename | move | copy | delete | mkdir
-  "source": "/old.txt",
-  "target": "/new.txt"
-}
+
+### 5. Chunked Upload (Large Files)
+```bash
+# Step 1: Initiate
+curl -X POST "http://localhost:4500/api/fs/local_fs/upload" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{"action":"initiate", "filename":"video.mp4", "path":"/uploads/video.mp4", "total_size":104857600, "checksum_sha256":"abc123..."}'
+# Note the `upload_id` returned
+
+# Step 2: Upload Chunks
+curl -X POST "http://localhost:4500/api/fs/local_fs/upload" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -F "action=chunk" \
+     -F "upload_id=upl_xxx" \
+     -F "chunk_index=0" \
+     -F "chunk_hash=sha256_of_chunk" \
+     -F "file=@chunk0.bin"
+
+# Step 3: Finalize
+curl -X POST "http://localhost:4500/api/fs/local_fs/upload" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{"action":"finalize", "upload_id":"upl_xxx"}'
+```
+
+### 6. File Actions (Rename, Move, Copy, Delete, Mkdir)
+```bash
+curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "action": "rename",
+           "source": "/old.txt",
+           "target": "/new.txt"
+         }'
 ```
 
 ---
 
 ## Admin API `/api/admin`
 
-All admin endpoints require a key with `full_admin` set to `true`.
+All admin endpoints require an API Key with `full_admin` set to `true`.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/admin/keys` | List all static & dynamic API keys (secrets masked) |
-| POST | `/api/admin/keys` | Generate, hash & save a new dynamic API key (returns unrecoverable `secret` once) |
-| DELETE | `/api/admin/keys/{name}` | Revoke an API key dynamically (or ban static key) |
-| GET | `/api/admin/bans` | List active IP and key bans |
-| POST | `/api/admin/bans/ip` | Ban an IP (Persistent SQLite state) |
-| DELETE | `/api/admin/bans/ip/{ip}` | Unban an IP |
-| POST | `/api/admin/bans/key` | Ban an API key |
-| DELETE | `/api/admin/bans/key/{name}` | Unban an API key |
-| GET | `/api/admin/circuit-breakers` | View circuit breaker states |
-| POST | `/api/admin/circuit-breakers/{key}/reset` | Reset a circuit breaker (Persistent SQLite state) |
-| GET | `/api/admin/config` | View live config (secrets redacted) |
-| GET | `/api/admin/databases` | Safe view of connected DB instances (secrets/URLs redacted) |
-| GET | `/api/admin/webhooks` | Safe view of event hook registrations (secrets redacted) |
-| GET | `/api/admin/rate-limits` | View rate limit global and per-key overrides |
+### 1. List API Keys
+```bash
+curl -X GET "http://localhost:4500/api/admin/keys" \
+     -H "Authorization: Bearer <TOKEN>"
+```
+
+### 2. Generate New Dynamic API Key
+Returns a completely new secret just once.
+```bash
+curl -X POST "http://localhost:4500/api/admin/keys" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "name": "service_bot_1",
+           "mode": "readwrite",
+           "db_scope": ["*"],
+           "fs_scope": ["public_assets"],
+           "rate_limit_override": 1000,
+           "full_admin": false
+         }'
+```
+
+### 3. Revoke/Ban API Key
+```bash
+curl -X DELETE "http://localhost:4500/api/admin/keys/service_bot_1" \
+     -H "Authorization: Bearer <TOKEN>"
+```
+
+### 4. List Active Bans
+```bash
+curl -X GET "http://localhost:4500/api/admin/bans" \
+     -H "Authorization: Bearer <TOKEN>"
+```
+
+### 5. Ban an IP Address
+```bash
+curl -X POST "http://localhost:4500/api/admin/bans/ip" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "ip": "192.168.1.100",
+           "reason": "Abuse of login endpoints",
+           "duration_seconds": 3600
+         }'
+```
+
+### 6. Unban an IP Address
+```bash
+curl -X DELETE "http://localhost:4500/api/admin/bans/ip/192.168.1.100" \
+     -H "Authorization: Bearer <TOKEN>"
+```
+
+### 7. Ban an API Key Manually
+```bash
+curl -X POST "http://localhost:4500/api/admin/bans/key" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "key_name": "legacy_key_2",
+           "reason": "Compromised credential",
+           "duration_seconds": null
+         }'
+```
+
+### 8. Unban an API Key
+```bash
+curl -X DELETE "http://localhost:4500/api/admin/bans/key/legacy_key_2" \
+     -H "Authorization: Bearer <TOKEN>"
+```
+
+### 9. View Circuit Breaker States
+```bash
+curl -X GET "http://localhost:4500/api/admin/circuit-breakers" \
+     -H "Authorization: Bearer <TOKEN>"
+```
+
+### 10. Reset Circuit Breaker Manually
+```bash
+curl -X POST "http://localhost:4500/api/admin/circuit-breakers/main_db/reset" \
+     -H "Authorization: Bearer <TOKEN>"
+```
+
+### 11. View Live System Config
+```bash
+curl -X GET "http://localhost:4500/api/admin/config" \
+     -H "Authorization: Bearer <TOKEN>"
+```
+
+### 12. List Active Databases
+Safe mode without viewing raw connection strings.
+```bash
+curl -X GET "http://localhost:4500/api/admin/databases" \
+     -H "Authorization: Bearer <TOKEN>"
+```
+
+### 13. List Webhook Regulations
+Safe mode without viewing HMAC Secrets.
+```bash
+curl -X GET "http://localhost:4500/api/admin/webhooks" \
+     -H "Authorization: Bearer <TOKEN>"
+```
+
+### 14. View Configuration Rate Limit Overrides
+```bash
+curl -X GET "http://localhost:4500/api/admin/rate-limits" \
+     -H "Authorization: Bearer <TOKEN>"
+```
 
 ---
 
 ## Federation API `/api/fed`
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/fed/servers` | List federated servers and their status |
+### 1. List Federated Servers
+```bash
+curl -X GET "http://localhost:4500/api/fed/servers" \
+     -H "Authorization: Bearer <TOKEN>"
+```
 
 ---
 

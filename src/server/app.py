@@ -58,7 +58,7 @@ def create_app() -> FastAPI:
             content={
                 "success": False,
                 "error": {
-                    "code": "SERVER_HTTP_ERROR",
+                    "code": getattr(exc, "code", "SERVER_HTTP_ERROR"),
                     "message": exc.detail,
                     "details": getattr(exc, "details", None)
                 },
