@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+### Added
+- **Dynamic Security Storage**: Cache-Aside SQLite architecture for high-performance (sub-millisecond), persistent storage of API keys and bans.
+- **Enhanced Admin API**: 
+  - `POST /api/admin/keys` now dynamically creates and persists keys with cryptographically random secrets (SHA-256 hashed).
+  - New safe endpoints `GET /api/admin/databases` and `GET /api/admin/webhooks` with masked secrets.
+- **Persistent Circuit Breakers**: Circuit breaker patterns now survive server restarts via SQLite.
+
 ## [1.0.0] - 2024-03-28
 
 ### Added

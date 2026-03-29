@@ -65,6 +65,7 @@ docker compose up -d
 - [ ] Set `features.playground = false` to disable Swagger UI
 - [ ] Configure `rate_limit.max_requests` appropriate for your expected traffic
 - [ ] Set `cache.backend = "redis"` and `rate_limit.backend = "redis"` for multi-worker deployments
+- [ ] Ensure the `/data` directory is mounted to a persistent volume, as it stores dynamic API keys and security state in SQLite
 - [ ] Configure `logging.level = "WARN"` or `"ERROR"` for production
 - [ ] Set `storage.<alias>.blocked_extensions` to block potentially dangerous uploads
 - [ ] Review `database.<alias>.dangerous_operations = false` (default) to prevent DDL

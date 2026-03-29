@@ -157,18 +157,20 @@ All admin endpoints require a key with `full_admin` set to `true`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/admin/keys` | List API keys (secrets masked) |
-| POST | `/api/admin/keys` | Generate new key template |
-| DELETE | `/api/admin/keys/{name}` | Revoke an API key |
+| GET | `/api/admin/keys` | List all static & dynamic API keys (secrets masked) |
+| POST | `/api/admin/keys` | Generate, hash & save a new dynamic API key (returns unrecoverable `secret` once) |
+| DELETE | `/api/admin/keys/{name}` | Revoke an API key dynamically (or ban static key) |
 | GET | `/api/admin/bans` | List active IP and key bans |
-| POST | `/api/admin/bans/ip` | Ban an IP |
+| POST | `/api/admin/bans/ip` | Ban an IP (Persistent SQLite state) |
 | DELETE | `/api/admin/bans/ip/{ip}` | Unban an IP |
 | POST | `/api/admin/bans/key` | Ban an API key |
 | DELETE | `/api/admin/bans/key/{name}` | Unban an API key |
 | GET | `/api/admin/circuit-breakers` | View circuit breaker states |
-| POST | `/api/admin/circuit-breakers/{key}/reset` | Reset a circuit breaker |
+| POST | `/api/admin/circuit-breakers/{key}/reset` | Reset a circuit breaker (Persistent SQLite state) |
 | GET | `/api/admin/config` | View live config (secrets redacted) |
-| GET | `/api/admin/rate-limits` | View rate limit config and overrides |
+| GET | `/api/admin/databases` | Safe view of connected DB instances (secrets/URLs redacted) |
+| GET | `/api/admin/webhooks` | Safe view of event hook registrations (secrets redacted) |
+| GET | `/api/admin/rate-limits` | View rate limit global and per-key overrides |
 
 ---
 

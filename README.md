@@ -11,7 +11,8 @@ An open-source, industrial-grade, unified API gateway for databases and file sto
 - Virtual file system proxy with built in zip-streaming and image resizing.
 - Real-time webhook emissions based on regex-like operation subscriptions.
 - Async HTTP streaming reverse-proxies for Federated edge nodes.
-- High performance multi-tier rate limiting.
+- High performance multi-tier rate limiting with DDoS protection.
+- Cache-Aside SQLite persistent state layer for sub-millisecond API Key and Ban validations.
 
 ## Quick Start
 1. `pip install -r requirements.txt`

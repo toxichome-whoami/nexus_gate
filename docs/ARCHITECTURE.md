@@ -2,6 +2,9 @@
 
 NexusGate is built on an aggressive, fully async architecture utilizing `FastAPI`, `httpx`, and `SQLGlot`.
 
+## Security Subsystem (Cache-Aside)
+NexusGate uses an embedded SQLite database (`data/security.db`) coupled with a native Python `dict` caching layer. This provides zero-latency (sub-nanosecond) authentication and ban evaluations without sacrificing disk-based persistence for dynamic API keys or circuit breaker thresholds.
+
 ## The Pipeline
 Every incoming request flows through the following middleware sequence:
 1. **SecurityHeadersMiddleware**: Injects HSTS, CSP, and X-Content-Type headers.

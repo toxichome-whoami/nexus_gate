@@ -8,7 +8,13 @@ NexusGate is designed with a "Security-First" philosophy, specifically engineere
 - **Mode Intersection**: Permissions are calculated by taking the intersection of the API key's mode and the resource's (database or storage) configured mode.
 - **Service-Level Isolation**: No cross-service data leakage. Database engines cannot interact with the storage system directly and vice versa.
 
-## 2. Attack Protections
+## 2. Dynamic Secret Storage (Cache-Aside Pattern)
+
+- **Persistent Security State**: All API keys generated via the Admin API, along with Administrator-enforced IP and Key bans, are stored in a persistent SQLite database (`data/security.db`).
+- **Hashed Secrets**: API Key secrets are never stored in plaintext inside the database. They are hashed using SHA-256 before storage. Even if the database file is exfiltrated, the raw secrets cannot be recovered.
+- **Ultra-Low Latency Caching**: To prevent database disk-I/O from creating a bottleneck during DDoS attacks, the SQLite database state is synchronized into a nanosecond-latency RAM cache. Authentication and ban checks occur strictly in memory.
+
+## 3. Attack Protections
 
 | Threat | Protection Mechanism |
 |--------|----------------------|
@@ -42,4 +48,4 @@ Mutating requests (`POST`, `PUT`, `DELETE`) can be made idempotent by providing 
 - **Restricted Scoping**: Never use `["*"]` for `db_scope` or `fs_scope` on keys exposed to end-user applications.
 - **Redaction**: Avoid enabling `features.playground` in public production environments.
 - **Log Rotation**: Ensure `logging.directory` is on a partition with sufficient space to prevent service denial due to disk exhaustion.
-- **IP Ban Persistence**: Use a Redis backend for rate limiting if you require ban persistence across container restarts.
+- **Rate Limit Penalties**: While admin-issued bans are permanently stored in SQLite, temporary IP penalties issued automatically by the rate limiter use the cache backend. Use a Redis backend for rate limiting if you require penalty persistence across load-balanced workers or container restarts.

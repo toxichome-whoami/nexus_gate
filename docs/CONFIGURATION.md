@@ -150,6 +150,9 @@ Per-webhook subscription definition.
 
 ## `[api_key.<name>]`
 
+> [!NOTE]
+> This configures **Static API Keys**. You can also generate and manage **Dynamic API Keys** seamlessly via the `/api/admin/keys` endpoint, which are safely hashed and stored in the `data/security.db` SQLite database.
+
 | Key | Required | Description |
 |-----|----------|-------------|
 | `secret` | yes | Secret string (≥32 chars) |
@@ -157,6 +160,7 @@ Per-webhook subscription definition.
 | `db_scope` | `["*"]` | Accessible database aliases |
 | `fs_scope` | `["*"]` | Accessible storage aliases |
 | `rate_limit_override` | `0` | Per-key rate limit (0 = global) |
+| `full_admin` | `false` | Grants access to `/api/admin/*` endpoints |
 
 ---
 
