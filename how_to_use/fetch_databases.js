@@ -1,4 +1,5 @@
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
@@ -18,10 +19,11 @@ const auth_token = Buffer.from(`${CONFIG.key_name}:${CONFIG.secret}`).toString('
 
 async function request(path, method) {
     const options = {
-        hostname: 'localhost',
-        port: 4500,
+        hostname: new URL(CONFIG.url).hostname,
+        port: new URL(CONFIG.url).port || (new URL(CONFIG.url).protocol === 'https:' ? 443 : 80),
         path: path,
         method: method,
+        rejectUnauthorized: false,
         headers: {
             'Authorization': `Bearer ${auth_token}`,
             'Content-Type': 'application/json'
@@ -29,7 +31,9 @@ async function request(path, method) {
     };
 
     return new Promise((resolve, reject) => {
-        const req = http.request(options, (res) => {
+        const parsedUrl = new URL(CONFIG.url);
+        const lib = parsedUrl.protocol === 'https:' ? https : http;
+        const req = lib.request(options, (res) => {
             let data = '';
             res.on('data', (chunk) => data += chunk);
             res.on('end', () => {

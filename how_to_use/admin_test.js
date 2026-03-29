@@ -1,4 +1,5 @@
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const envPath = path.resolve(__dirname, '.env');
@@ -18,6 +19,7 @@ async function request(apiPath, method = 'GET', body = null) {
     const url = new URL(`${CONFIG.url}${apiPath}`);
     const options = {
         method: method,
+        rejectUnauthorized: false,
         headers: {
             'Authorization': authHeader,
             'Content-Type': 'application/json'
@@ -25,7 +27,9 @@ async function request(apiPath, method = 'GET', body = null) {
     };
 
     return new Promise((resolve, reject) => {
-        const req = http.request(url, options, (res) => {
+        const parsedUrl = new URL(CONFIG.url);
+        const lib = parsedUrl.protocol === 'https:' ? https : http;
+        const req = lib.request(url, options, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {

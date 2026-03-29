@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const https = require('https');
 const crypto = require('crypto');
 const readline = require('readline');
 
@@ -44,6 +45,7 @@ async function callGateway(path, body = null, method = 'POST') {
 
     const options = {
         method: method,
+        rejectUnauthorized: false,
         headers: {
             'Authorization': authHeader,
             'Content-Type': 'application/json',
@@ -53,7 +55,9 @@ async function callGateway(path, body = null, method = 'POST') {
     };
 
     return new Promise((resolve, reject) => {
-        const req = http.request(url, options, (res) => {
+        const parsedUrl = new URL(CONFIG.url);
+        const lib = parsedUrl.protocol === 'https:' ? https : http;
+        const req = lib.request(url, options, (res) => {
             let data = '';
             res.on('data', chunk => { data += chunk; });
             res.on('end', () => {

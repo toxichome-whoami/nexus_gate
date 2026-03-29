@@ -1,5 +1,6 @@
 const fs = require('fs');
 const http = require('http');
+const https = require('https');
 const path = require('path');
 const crypto = require('crypto');
 
@@ -28,6 +29,7 @@ async function request(apiPath, method, body = null, headers = {}) {
     const url = new URL(`${CONFIG.url}${apiPath}`);
     const options = {
         method: method,
+        rejectUnauthorized: false,
         headers: {
             'Authorization': authHeader,
             ...headers
@@ -35,7 +37,9 @@ async function request(apiPath, method, body = null, headers = {}) {
     };
 
     return new Promise((resolve, reject) => {
-        const req = http.request(url, options, (res) => {
+        const parsedUrl = new URL(CONFIG.url);
+        const lib = parsedUrl.protocol === 'https:' ? https : http;
+        const req = lib.request(url, options, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
