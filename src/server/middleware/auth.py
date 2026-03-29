@@ -68,7 +68,7 @@ async def get_auth_context(
             db_scope=db_key["db_scope"],
             fs_scope=db_key["fs_scope"],
             rate_limit_override=db_key["rate_limit_override"],
-            full_admin=db_key["full_admin"],
+            full_admin=False,
         )
 
     # 2. Check Static Keys (config.toml)

@@ -215,7 +215,9 @@ curl -X GET "http://localhost:4500/api/admin/keys" \
 ```
 
 ### 2. Generate New Dynamic API Key
-Returns a completely new secret just once.
+Returns a completely new secret just once. 
+*(Note: Keys created dynamically via the API cannot be assigned `full_admin` privileges. Only static keys in `config.toml` can be superadmins).*
+
 ```bash
 curl -X POST "http://localhost:4500/api/admin/keys" \
      -H "Authorization: Bearer <TOKEN>" \
@@ -225,8 +227,7 @@ curl -X POST "http://localhost:4500/api/admin/keys" \
            "mode": "readwrite",
            "db_scope": ["*"],
            "fs_scope": ["public_assets"],
-           "rate_limit_override": 1000,
-           "full_admin": false
+           "rate_limit_override": 1000
          }'
 ```
 

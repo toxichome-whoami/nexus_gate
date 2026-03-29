@@ -44,7 +44,6 @@ class SecurityStorage:
                         db_scope TEXT NOT NULL,
                         fs_scope TEXT NOT NULL,
                         rate_limit_override INTEGER DEFAULT 0,
-                        full_admin BOOLEAN DEFAULT 0,
                         created_at REAL NOT NULL
                     )
                 ''')
@@ -82,7 +81,7 @@ class SecurityStorage:
         async with aiosqlite.connect(DB_PATH) as db:
             # 1. API Keys
             cls._api_keys_cache.clear()
-            async with db.execute('SELECT name, secret_hash, mode, db_scope, fs_scope, rate_limit_override, full_admin FROM api_keys') as cursor:
+            async with db.execute('SELECT name, secret_hash, mode, db_scope, fs_scope, rate_limit_override FROM api_keys') as cursor:
                 async for row in cursor:
                     try:
                         db_scope = json.loads(row[3])
@@ -95,8 +94,7 @@ class SecurityStorage:
                         "mode": row[2],
                         "db_scope": db_scope,
                         "fs_scope": fs_scope,
-                        "rate_limit_override": row[5],
-                        "full_admin": bool(row[6])
+                        "rate_limit_override": row[5]
                     }
 
             # 2. Bans
@@ -129,13 +127,13 @@ class SecurityStorage:
 
     # -- API KEY METHODS --
     @classmethod
-    async def add_api_key(cls, name: str, secret_hash: str, mode: str, db_scope: list, fs_scope: list, rate_limit: int, full_admin: bool):
+    async def add_api_key(cls, name: str, secret_hash: str, mode: str, db_scope: list, fs_scope: list, rate_limit: int):
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('''
                 INSERT OR REPLACE INTO api_keys
-                (name, secret_hash, mode, db_scope, fs_scope, rate_limit_override, full_admin, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (name, secret_hash, mode, json.dumps(db_scope), json.dumps(fs_scope), rate_limit, int(full_admin), time.time()))
+                (name, secret_hash, mode, db_scope, fs_scope, rate_limit_override, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (name, secret_hash, mode, json.dumps(db_scope), json.dumps(fs_scope), rate_limit, time.time()))
             await db.commit()
             
         cls._api_keys_cache[name] = {
@@ -143,8 +141,7 @@ class SecurityStorage:
             "mode": mode,
             "db_scope": db_scope,
             "fs_scope": fs_scope,
-            "rate_limit_override": rate_limit,
-            "full_admin": full_admin
+            "rate_limit_override": rate_limit
         }
 
     @classmethod

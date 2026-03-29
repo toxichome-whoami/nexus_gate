@@ -151,7 +151,7 @@ Per-webhook subscription definition.
 ## `[api_key.<name>]`
 
 > [!NOTE]
-> This configures **Static API Keys**. You can also generate and manage **Dynamic API Keys** seamlessly via the `/api/admin/keys` endpoint, which are safely hashed and stored in the `data/security.db` SQLite database.
+> This configures **Static API Keys**. You can also generate and manage **Dynamic API Keys** seamlessly via the `/api/admin/keys` endpoint. For security reasons, Dynamic keys cannot be assigned `full_admin` privileges; only static keys managed by developers in this configuration file may act as superadmins.
 
 | Key | Required | Description |
 |-----|----------|-------------|

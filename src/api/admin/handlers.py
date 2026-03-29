@@ -8,6 +8,7 @@ from typing import Optional
 import secrets
 import string
 import hashlib
+import base64
 
 from server.middleware.auth import require_admin
 from api.responses import success_response
@@ -49,7 +50,7 @@ async def list_api_keys(request: Request, auth=Depends(require_admin)):
             "db_scope": key_data["db_scope"],
             "fs_scope": key_data["fs_scope"],
             "rate_limit_override": key_data["rate_limit_override"],
-            "full_admin": key_data["full_admin"]
+            "full_admin": False
         })
 
     return success_response(request, {"keys": keys})
@@ -66,7 +67,7 @@ async def create_api_key(
     db_scope = body.get("db_scope", ["*"])
     fs_scope = body.get("fs_scope", ["*"])
     rate_limit = body.get("rate_limit_override", 0)
-    full_admin = body.get("full_admin", False)
+    full_admin = False
 
     if not name:
         raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "Key name is required", 400)
@@ -88,11 +89,9 @@ async def create_api_key(
         mode=mode,
         db_scope=db_scope,
         fs_scope=fs_scope,
-        rate_limit=rate_limit,
-        full_admin=full_admin
+        rate_limit=rate_limit
     )
 
-    import base64
     bearer = base64.b64encode(f"{name}:{raw_secret}".encode()).decode()
 
     return success_response(request, {
