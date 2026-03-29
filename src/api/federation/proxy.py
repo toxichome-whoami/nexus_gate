@@ -5,7 +5,7 @@ from starlette.responses import StreamingResponse
 
 from config.loader import ConfigManager
 from api.errors import NexusGateException, ErrorCodes
-from fastapi.background import BackgroundTask
+from starlette.background import BackgroundTask
 
 # Shared clients (one per trust mode)
 _clients: dict = {}
