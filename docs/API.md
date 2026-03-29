@@ -206,18 +206,24 @@ curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
 
 ## Admin API `/api/admin`
 
-All admin endpoints require an API Key with `full_admin` set to `true`.
+All admin endpoints require an API key with `full_admin` set to `true` in `config.toml`.
 
-### 1. List API Keys
+> [!IMPORTANT]
+> Dynamic keys created via the API **cannot** have `full_admin` privileges. Only static keys defined in `config.toml` can be superadmins. You also cannot ban or revoke the key you are currently using (self-lockout protection).
+
+---
+
+### API Key Management
+
+#### List All API Keys
+Shows both static (`config.toml`) and dynamic (`SQLite`) keys. Secrets are never exposed.
 ```bash
 curl -X GET "http://localhost:4500/api/admin/keys" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
-### 2. Generate New Dynamic API Key
-Returns a completely new secret just once. 
-*(Note: Keys created dynamically via the API cannot be assigned `full_admin` privileges. Only static keys in `config.toml` can be superadmins).*
-
+#### Create Dynamic API Key
+Generates a new key with a cryptographically secure secret (32-64 chars). The raw secret and a ready-to-use Bearer token are returned **once** and cannot be retrieved again.
 ```bash
 curl -X POST "http://localhost:4500/api/admin/keys" \
      -H "Authorization: Bearer <TOKEN>" \
@@ -231,19 +237,25 @@ curl -X POST "http://localhost:4500/api/admin/keys" \
          }'
 ```
 
-### 3. Revoke/Ban API Key
+#### Revoke API Key
+Dynamic keys are deleted from SQLite. Static keys (from `config.toml`) are permanently banned instead.
 ```bash
 curl -X DELETE "http://localhost:4500/api/admin/keys/service_bot_1" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
-### 4. List Active Bans
+---
+
+### Ban Management
+
+#### List Active Bans
 ```bash
 curl -X GET "http://localhost:4500/api/admin/bans" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
-### 5. Ban an IP Address
+#### Ban an IP Address
+Set `duration_seconds` to `null` for a permanent ban.
 ```bash
 curl -X POST "http://localhost:4500/api/admin/bans/ip" \
      -H "Authorization: Bearer <TOKEN>" \
@@ -255,13 +267,13 @@ curl -X POST "http://localhost:4500/api/admin/bans/ip" \
          }'
 ```
 
-### 6. Unban an IP Address
+#### Unban an IP Address
 ```bash
 curl -X DELETE "http://localhost:4500/api/admin/bans/ip/192.168.1.100" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
-### 7. Ban an API Key Manually
+#### Ban an API Key
 ```bash
 curl -X POST "http://localhost:4500/api/admin/bans/key" \
      -H "Authorization: Bearer <TOKEN>" \
@@ -273,85 +285,108 @@ curl -X POST "http://localhost:4500/api/admin/bans/key" \
          }'
 ```
 
-### 8. Unban an API Key
+#### Unban an API Key
 ```bash
 curl -X DELETE "http://localhost:4500/api/admin/bans/key/legacy_key_2" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
-### 9. View Circuit Breaker States
+---
+
+### Circuit Breaker Management
+
+#### View Circuit Breaker States
 ```bash
 curl -X GET "http://localhost:4500/api/admin/circuit-breakers" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
-### 10. Reset Circuit Breaker Manually
+#### Reset a Circuit Breaker
 ```bash
 curl -X POST "http://localhost:4500/api/admin/circuit-breakers/main_db/reset" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
-### 11. View Live System Config
-```bash
-curl -X GET "http://localhost:4500/api/admin/config" \
-     -H "Authorization: Bearer <TOKEN>"
-```
+---
 
-### 12. List Active Databases
-Safe mode without viewing raw connection strings.
+### Database Management
+
+#### List Databases
+Shows all connected databases (both static and dynamic). Connection URLs are always redacted.
 ```bash
 curl -X GET "http://localhost:4500/api/admin/databases" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
-### 13. Create Dynamic Database
+#### Create Dynamic Database
+Adds a new database connection at runtime. Persisted in SQLite and survives restarts.
 ```bash
 curl -X POST "http://localhost:4500/api/admin/databases" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{
-           "name": "secondary_db",
+           "name": "analytics_db",
            "engine": "postgres",
-           "url": "postgresql://user:pass@localhost:5432/db",
+           "url": "postgresql://user:pass@localhost:5432/analytics",
            "mode": "readonly",
+           "pool_min": 2,
+           "pool_max": 10,
            "dangerous_operations": false
          }'
 ```
 
-### 14. Delete Dynamic Database
+#### Delete Dynamic Database
+Only removes databases that were added via the API. Static databases from `config.toml` cannot be deleted.
 ```bash
-curl -X DELETE "http://localhost:4500/api/admin/databases/secondary_db" \
+curl -X DELETE "http://localhost:4500/api/admin/databases/analytics_db" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
-### 15. List Webhook Regulations
-Safe mode without viewing HMAC Secrets.
+---
+
+### Webhook Management
+
+#### List Webhooks
+Shows all registered webhooks. HMAC secrets are always redacted.
 ```bash
 curl -X GET "http://localhost:4500/api/admin/webhooks" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
-### 16. Create Dynamic Webhook
+#### Create Dynamic Webhook
+Adds a new webhook listener at runtime. The HMAC signing secret is **auto-generated** (32–64 chars) and returned **once** — store it securely. Persisted in SQLite.
 ```bash
 curl -X POST "http://localhost:4500/api/admin/webhooks" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{
            "name": "audit_hook",
-           "url": "http://example.com/api/intercept",
-           "secret": "mySuperSecretHmacKey123!",
+           "url": "https://example.com/api/intercept",
            "rule": "db.delete@main_db:*",
            "enabled": true
          }'
 ```
 
-### 17. Delete Dynamic Webhook
+#### Delete Dynamic Webhook
+Only removes webhooks that were added via the API. Static webhooks from `config.toml` cannot be deleted.
 ```bash
 curl -X DELETE "http://localhost:4500/api/admin/webhooks/audit_hook" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
-### 18. View Configuration Rate Limit Overrides
+---
+
+### System Introspection
+
+#### View Live Config
+Returns the full running configuration with all secrets, URLs, and API keys redacted.
+```bash
+curl -X GET "http://localhost:4500/api/admin/config" \
+     -H "Authorization: Bearer <TOKEN>"
+```
+
+#### View Rate Limit Overrides
+Shows global rate limit settings and any per-key overrides (from both static and dynamic keys).
 ```bash
 curl -X GET "http://localhost:4500/api/admin/rate-limits" \
      -H "Authorization: Bearer <TOKEN>"

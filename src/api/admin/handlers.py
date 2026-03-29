@@ -18,7 +18,6 @@ from security.ban_list import BanList
 from security.circuit_breaker import CircuitBreaker
 from security.storage import SecurityStorage
 from db.pool import DatabasePoolManager
-from db.pool import DatabasePoolManager
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -261,11 +260,37 @@ async def view_webhooks(request: Request, auth=Depends(require_admin)):
 @router.post("/webhooks")
 async def create_webhook(request: Request, body: dict = Body(...), auth=Depends(require_admin)):
     name = body.get("name")
+    url = body.get("url")
+    rule = body.get("rule")
+    enabled = body.get("enabled", True)
+
     if not name:
         raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "Webhook name required", 400)
+    if not url:
+        raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "Webhook url required", 400)
+    if not rule:
+        raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "Webhook rule required", 400)
 
-    await SecurityStorage.add_webhook(name, body)
-    return success_response(request, {"created_webhook": name})
+    # Auto-generate HMAC secret (32-64 chars, A-Z a-z 0-9)
+    alphabet = string.ascii_letters + string.digits
+    length = secrets.choice(range(32, 65))
+    raw_secret = ''.join(secrets.choice(alphabet) for _ in range(length))
+
+    await SecurityStorage.add_webhook(name, {
+        "url": url,
+        "secret": raw_secret,
+        "rule": rule,
+        "enabled": enabled
+    })
+
+    return success_response(request, {
+        "name": name,
+        "url": url,
+        "rule": rule,
+        "enabled": enabled,
+        "secret": raw_secret,
+        "note": "Store this HMAC secret now. It will not be shown again."
+    })
 
 @router.delete("/webhooks/{name}")
 async def delete_webhook(request: Request, name: str = Path(...), auth=Depends(require_admin)):
