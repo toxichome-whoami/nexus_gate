@@ -7,7 +7,7 @@ from config.loader import ConfigManager
 from utils.types import AuthContext, ServerMode
 from api.errors import NexusGateException, ErrorCodes
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 async def get_auth_context(
     request: Request,
@@ -73,6 +73,13 @@ async def get_auth_context(
         )
 
     # ── Standard Bearer Token Auth ──────────────────────────────
+    if not credentials:
+        raise NexusGateException(
+            code=ErrorCodes.AUTH_INVALID_FORMAT,
+            message="Missing authentication. Provide Authorization: Bearer <token> or federation headers.",
+            status_code=401,
+        )
+
     encoded_token = credentials.credentials
     try:
         decoded_token = base64.b64decode(encoded_token).decode("utf-8")
