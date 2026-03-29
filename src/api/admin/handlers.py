@@ -134,6 +134,37 @@ async def revoke_api_key(
     return success_response(request, {"revoked": key_name, "note": msg})
 
 
+@router.patch("/keys/actions")
+async def update_api_key(
+    request: Request,
+    body: dict = Body(...),
+    auth=Depends(require_admin),
+):
+    """Update a dynamic API key's properties. Secret cannot be changed."""
+    name = body.get("name")
+    if not name:
+        raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "Key name is required", 400)
+
+    # Only dynamic keys can be updated
+    config = ConfigManager.get()
+    if name in config.api_key:
+        raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"Static key '{name}' from config.toml cannot be modified via API", 400)
+
+    updates = {}
+    for field in ["mode", "db_scope", "fs_scope", "rate_limit_override"]:
+        if field in body:
+            updates[field] = body[field]
+
+    if not updates:
+        raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "No updatable fields provided. Allowed: mode, db_scope, fs_scope, rate_limit_override", 400)
+
+    updated = await SecurityStorage.update_api_key(name, updates)
+    if not updated:
+        raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"Dynamic key '{name}' not found", 404)
+
+    return success_response(request, {"updated_key": name, "changes": updates})
+
+
 # ─── Ban Management ───────────────────────────────────────────────────────────
 
 @router.get("/bans")
@@ -243,6 +274,42 @@ async def delete_database(request: Request, name: str = Path(...), auth=Depends(
 
     return success_response(request, {"deleted_database": name})
 
+@router.patch("/databases/actions")
+async def update_database(request: Request, body: dict = Body(...), auth=Depends(require_admin)):
+    """Update a dynamic database's properties. query_whitelist and query_blacklist are config.toml only."""
+    name = body.get("name")
+    if not name:
+        raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "Database name is required", 400)
+
+    config = ConfigManager.get()
+    if name in config.database and not await SecurityStorage.update_database(name, {}):
+        # It exists in config but not in dynamic table
+        pass
+
+    updates = {}
+    allowed = ["engine", "url", "mode", "pool_min", "pool_max",
+               "connection_timeout", "idle_timeout", "max_lifetime", "dangerous_operations"]
+    for field in allowed:
+        if field in body:
+            updates[field] = body[field]
+
+    # Reject query_whitelist and query_blacklist
+    for blocked in ["query_whitelist", "query_blacklist"]:
+        if blocked in body:
+            raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"'{blocked}' can only be set in config.toml", 400)
+
+    if not updates:
+        raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "No updatable fields provided", 400)
+
+    updated = await SecurityStorage.update_database(name, updates)
+    if not updated:
+        raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"Dynamic database '{name}' not found", 404)
+
+    # Hot-reload pool
+    await DatabasePoolManager.remove_engine(name)
+
+    return success_response(request, {"updated_database": name, "changes": updates})
+
 @router.get("/webhooks")
 async def view_webhooks(request: Request, auth=Depends(require_admin)):
     """Safe view of configured webhooks, omitting secrets"""
@@ -299,6 +366,27 @@ async def delete_webhook(request: Request, name: str = Path(...), auth=Depends(r
         raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"Dynamic Webhook '{name}' not found", 404)
 
     return success_response(request, {"deleted_webhook": name})
+
+@router.patch("/webhooks/actions")
+async def update_webhook(request: Request, body: dict = Body(...), auth=Depends(require_admin)):
+    """Update a dynamic webhook's properties. Secret cannot be changed."""
+    name = body.get("name")
+    if not name:
+        raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "Webhook name is required", 400)
+
+    updates = {}
+    for field in ["url", "rule", "enabled"]:
+        if field in body:
+            updates[field] = body[field]
+
+    if not updates:
+        raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "No updatable fields provided. Allowed: url, rule, enabled", 400)
+
+    updated = await SecurityStorage.update_webhook(name, updates)
+    if not updated:
+        raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"Dynamic webhook '{name}' not found", 404)
+
+    return success_response(request, {"updated_webhook": name, "changes": updates})
 
 
 # ─── Live Config View ─────────────────────────────────────────────────────────

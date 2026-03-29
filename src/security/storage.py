@@ -344,3 +344,94 @@ class SecurityStorage:
                     del config.webhook[name]
                 return True
         return False
+
+    # -- UPDATE METHODS (partial updates, never touch secrets) --
+    @classmethod
+    async def update_api_key(cls, name: str, updates: dict) -> bool:
+        """Update a dynamic API key's mutable fields. Secret is never changed."""
+        existing = cls._api_keys_cache.get(name)
+        if not existing:
+            return False
+
+        mode = updates.get("mode", existing["mode"])
+        db_scope = updates.get("db_scope", existing["db_scope"])
+        fs_scope = updates.get("fs_scope", existing["fs_scope"])
+        rate_limit = updates.get("rate_limit_override", existing["rate_limit_override"])
+
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute('''
+                UPDATE api_keys SET mode = ?, db_scope = ?, fs_scope = ?, rate_limit_override = ?
+                WHERE name = ?
+            ''', (mode, json.dumps(db_scope), json.dumps(fs_scope), rate_limit, name))
+            await db.commit()
+            if cursor.rowcount == 0:
+                return False
+
+        # Update cache
+        existing["mode"] = mode
+        existing["db_scope"] = db_scope
+        existing["fs_scope"] = fs_scope
+        existing["rate_limit_override"] = rate_limit
+        return True
+
+    @classmethod
+    async def update_database(cls, name: str, updates: dict) -> bool:
+        """Update a dynamic database's mutable fields."""
+        async with aiosqlite.connect(DB_PATH) as db:
+            # Check if it exists in the dynamic table
+            async with db.execute('SELECT * FROM databases WHERE name = ?', (name,)) as cursor:
+                row = await cursor.fetchone()
+                if not row:
+                    return False
+
+            sets = []
+            vals = []
+            allowed = ["engine", "url", "mode", "pool_min", "pool_max",
+                        "connection_timeout", "idle_timeout", "max_lifetime", "dangerous_operations"]
+            for field in allowed:
+                if field in updates:
+                    val = updates[field]
+                    if field == "dangerous_operations":
+                        val = int(val)
+                    sets.append(f"{field} = ?")
+                    vals.append(val)
+
+            if not sets:
+                return False
+
+            vals.append(name)
+            await db.execute(f'UPDATE databases SET {", ".join(sets)} WHERE name = ?', vals)
+            await db.commit()
+
+        await cls._reload_caches()
+        return True
+
+    @classmethod
+    async def update_webhook(cls, name: str, updates: dict) -> bool:
+        """Update a dynamic webhook's mutable fields. Secret is never changed."""
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT * FROM webhooks WHERE name = ?', (name,)) as cursor:
+                row = await cursor.fetchone()
+                if not row:
+                    return False
+
+            sets = []
+            vals = []
+            allowed = ["url", "rule", "enabled"]
+            for field in allowed:
+                if field in updates:
+                    val = updates[field]
+                    if field == "enabled":
+                        val = int(val)
+                    sets.append(f"{field} = ?")
+                    vals.append(val)
+
+            if not sets:
+                return False
+
+            vals.append(name)
+            await db.execute(f'UPDATE webhooks SET {", ".join(sets)} WHERE name = ?', vals)
+            await db.commit()
+
+        await cls._reload_caches()
+        return True

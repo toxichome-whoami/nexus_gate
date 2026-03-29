@@ -244,6 +244,20 @@ curl -X DELETE "http://localhost:4500/api/admin/keys/service_bot_1" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
+#### Update Dynamic API Key
+Partially update an existing dynamic key's properties. The API key secret **cannot** be changed. Static keys from `config.toml` cannot be modified.
+```bash
+curl -X PATCH "http://localhost:4500/api/admin/keys/actions" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "name": "service_bot_1",
+           "mode": "readonly",
+           "db_scope": ["analytics_db"],
+           "rate_limit_override": 500
+         }'
+```
+
 ---
 
 ### Ban Management
@@ -342,6 +356,19 @@ curl -X DELETE "http://localhost:4500/api/admin/databases/analytics_db" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
+#### Update Dynamic Database
+Partially update an existing dynamic database's connection settings. `query_whitelist` and `query_blacklist` can only be set in `config.toml`.
+```bash
+curl -X PATCH "http://localhost:4500/api/admin/databases/actions" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "name": "analytics_db",
+           "mode": "readwrite",
+           "pool_max": 20
+         }'
+```
+
 ---
 
 ### Webhook Management
@@ -372,6 +399,19 @@ Only removes webhooks that were added via the API. Static webhooks from `config.
 ```bash
 curl -X DELETE "http://localhost:4500/api/admin/webhooks/audit_hook" \
      -H "Authorization: Bearer <TOKEN>"
+```
+
+#### Update Dynamic Webhook
+Partially update an existing dynamic webhook's properties. The HMAC secret **cannot** be changed.
+```bash
+curl -X PATCH "http://localhost:4500/api/admin/webhooks/actions" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "name": "audit_hook",
+           "url": "https://new-server.com/api/intercept",
+           "enabled": false
+         }'
 ```
 
 ---
