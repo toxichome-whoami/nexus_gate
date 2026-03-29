@@ -1,6 +1,6 @@
 """Unit tests for the dynamic filter builder."""
 import pytest
-from src.api.database.filter_builder import (
+from api.database.filter_builder import (
     build_where_clause,
     construct_insert,
     construct_update,

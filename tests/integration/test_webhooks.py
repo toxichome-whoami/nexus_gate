@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 def test_webhook_emit_no_config(test_client):
     """Webhooks should silently drop events when no rules match."""
-    from src.webhook.emitter import emit_event, WebhookTrigger
+    from webhook.emitter import emit_event, WebhookTrigger
 
     # Should not raise even without matching webhook rules
     emit_event(
@@ -21,7 +21,7 @@ def test_webhook_emit_no_config(test_client):
 
 
 def test_webhook_signer_correct_format():
-    from src.webhook.signer import generate_signature
+    from webhook.signer import generate_signature
 
     sig = generate_signature("my_secret_key_here", '{"event": "test"}')
     assert sig.startswith("sha256=")
@@ -29,7 +29,7 @@ def test_webhook_signer_correct_format():
 
 
 def test_webhook_signer_deterministic():
-    from src.webhook.signer import generate_signature
+    from webhook.signer import generate_signature
 
     payload = '{"data": "hello"}'
     secret = "deterministic_secret_32_chars_min"
@@ -39,7 +39,7 @@ def test_webhook_signer_deterministic():
 
 
 def test_webhook_signer_different_secrets_differ():
-    from src.webhook.signer import generate_signature
+    from webhook.signer import generate_signature
 
     payload = '{"data": "hello"}'
     sig1 = generate_signature("secret_one_32_chars_min_padding00", payload)
@@ -50,15 +50,14 @@ def test_webhook_signer_different_secrets_differ():
 @pytest.mark.asyncio
 async def test_queue_full_drops_gracefully():
     """When the queue is at max capacity, events should be dropped without exception."""
-    from src.webhook.emitter import WebhookQueueList
-    import asyncio
+    from webhook.emitter import WebhookQueueList
 
     # Reset singleton queue to a tiny queue
     WebhookQueueList._queue = asyncio.Queue(maxsize=1)
     WebhookQueueList._queue.put_nowait({"test": True})  # Fill it
 
-    from src.webhook.emitter import emit_event, WebhookTrigger
-    from src.config.loader import ConfigManager
+    from webhook.emitter import emit_event, WebhookTrigger
+    from config.loader import ConfigManager
 
     # Patch config to enable webhooks and have a matching rule
     with patch.object(ConfigManager, "get") as mock_cfg:
