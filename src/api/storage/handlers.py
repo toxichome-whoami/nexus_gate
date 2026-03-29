@@ -48,8 +48,27 @@ async def list_storages(request: Request, auth: AuthContext = Depends(get_auth_c
                 "status": "available" if os.path.exists(storage_cfg.path) else "unavailable",
                 "limit": storage_cfg.limit,
                 "chunk_size": storage_cfg.chunk_size,
-                "max_file_size": storage_cfg.max_file_size
+                "max_file_size": storage_cfg.max_file_size,
+                "federated": False,
             })
+
+    # Append federated storages from synced remote servers
+    if config.features.federation and config.federation.enabled:
+        from api.federation.sync import FederationState
+        state = FederationState()
+        for alias, srv_state in state.servers.items():
+            if srv_state.get("status") != "up":
+                continue
+            for storage_name, storage_status in srv_state.get("storages", {}).items():
+                fed_name = f"{alias}_{storage_name}"
+                if "*" in auth.fs_scope or fed_name in auth.fs_scope:
+                    storages.append({
+                        "name": fed_name,
+                        "mode": "proxy",
+                        "status": storage_status if isinstance(storage_status, str) else "available",
+                        "federated": True,
+                        "remote_server": alias,
+                    })
 
     return success_response(request, {"storages": storages})
 
