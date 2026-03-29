@@ -74,7 +74,7 @@ class SecurityStorage:
                 ''')
                 # Dynamic Databases table
                 await db.execute('''
-                    CREATE TABLE IF NOT EXISTS dynamic_databases (
+                    CREATE TABLE IF NOT EXISTS databases (
                         name TEXT PRIMARY KEY,
                         engine TEXT NOT NULL,
                         url TEXT NOT NULL,
@@ -156,7 +156,7 @@ class SecurityStorage:
             # 4. Synchronize Databases & Webhooks directly into ConfigManager memory
             config = ConfigManager.get()
 
-            async with db.execute('SELECT name, engine, url, mode, pool_min, pool_max, connection_timeout, idle_timeout, max_lifetime, dangerous_operations FROM dynamic_databases') as cursor:
+            async with db.execute('SELECT name, engine, url, mode, pool_min, pool_max, connection_timeout, idle_timeout, max_lifetime, dangerous_operations FROM databases') as cursor:
                 async for row in cursor:
                     config.database[row[0]] = DatabaseDefConfig(
                         engine=row[1], url=row[2], mode=row[3], pool_min=row[4], pool_max=row[5],
@@ -296,10 +296,10 @@ class SecurityStorage:
 
     # -- DYNAMIC CONFIGURATION (Databases / Webhooks) METHODS --
     @classmethod
-    async def add_dynamic_database(cls, name: str, cfg: dict):
+    async def add_database(cls, name: str, cfg: dict):
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('''
-                INSERT OR REPLACE INTO dynamic_databases
+                INSERT OR REPLACE INTO databases
                 (name, engine, url, mode, pool_min, pool_max, connection_timeout, idle_timeout, max_lifetime, dangerous_operations)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
@@ -311,9 +311,9 @@ class SecurityStorage:
         await cls._reload_caches() # Force config remap
 
     @classmethod
-    async def delete_dynamic_database(cls, name: str) -> bool:
+    async def delete_database(cls, name: str) -> bool:
         async with aiosqlite.connect(DB_PATH) as db:
-            cursor = await db.execute('DELETE FROM dynamic_databases WHERE name = ?', (name,))
+            cursor = await db.execute('DELETE FROM databases WHERE name = ?', (name,))
             await db.commit()
             if cursor.rowcount > 0:
                 config = ConfigManager.get()

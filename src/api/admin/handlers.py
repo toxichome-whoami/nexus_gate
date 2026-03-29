@@ -227,7 +227,7 @@ async def create_database(request: Request, body: dict = Body(...), auth=Depends
     if not name:
         raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "Database name requires", 400)
 
-    await SecurityStorage.add_dynamic_database(name, body)
+    await SecurityStorage.add_database(name, body)
 
     # If it was already loaded, hot-reload the pool
     await DatabasePoolManager.remove_engine(name)
@@ -236,7 +236,7 @@ async def create_database(request: Request, body: dict = Body(...), auth=Depends
 
 @router.delete("/databases/{name}")
 async def delete_database(request: Request, name: str = Path(...), auth=Depends(require_admin)):
-    removed = await SecurityStorage.delete_dynamic_database(name)
+    removed = await SecurityStorage.delete_database(name)
     if not removed:
         raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"Dynamic Database '{name}' not found", 404)
 
