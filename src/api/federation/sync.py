@@ -67,8 +67,17 @@ async def sync_federated_servers():
                                         "mode": db_info.get("mode", "unknown"),
                                         "tables_count": db_info.get("tables_count", 0),
                                     }
+                            else:
+                                # Non-200 (e.g. 401) — fallback to health data
+                                for db_name, db_status in health_dbs.items():
+                                    databases[db_name] = {
+                                        "status": db_status,
+                                        "engine": "unknown",
+                                        "mode": "unknown",
+                                        "tables_count": 0,
+                                    }
                         except Exception:
-                            # Fallback to health-only data
+                            # Exception — fallback to health data
                             for db_name, db_status in health_dbs.items():
                                 databases[db_name] = {
                                     "status": db_status,
