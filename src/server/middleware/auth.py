@@ -41,7 +41,9 @@ async def get_auth_context(
         )
 
     # IP ban check
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = request.headers.get("X-Forwarded-For") or request.headers.get("X-Real-IP") or (request.client.host if request.client else "unknown")
+    if isinstance(client_ip, str) and "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
     ip_banned, ip_reason = BanList.is_ip_banned(client_ip)
     if ip_banned:
         raise NexusGateException(

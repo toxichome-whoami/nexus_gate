@@ -27,7 +27,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # 1. Identify client
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = request.headers.get("X-Forwarded-For") or request.headers.get("X-Real-IP") or (request.client.host if request.client else "unknown")
+        if isinstance(client_ip, str) and "," in client_ip:
+            # X-Forwarded-For can contain a list of IPs, the first is the original client
+            client_ip = client_ip.split(",")[0].strip()
         if client_ip in config.server.allowed_ips:
             return await call_next(request)
 

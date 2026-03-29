@@ -25,7 +25,9 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             
             # Use request.client.host instead of trusting X-Forwarded-For implicitly here,
             # though WAF or an upstream proxy setup will define real ip.
-            client_ip = request.client.host if request.client else None
+            client_ip = request.headers.get("X-Forwarded-For") or request.headers.get("X-Real-IP") or (request.client.host if request.client else "unknown")
+            if isinstance(client_ip, str) and "," in client_ip:
+                client_ip = client_ip.split(",")[0].strip()
             
             logger.error(
                 "Request failed",
@@ -40,7 +42,9 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             raise
             
         duration_ms = (time.perf_counter() - start_time) * 1000
-        client_ip = request.client.host if request.client else None
+        client_ip = request.headers.get("X-Forwarded-For") or request.headers.get("X-Real-IP") or (request.client.host if request.client else "unknown")
+        if isinstance(client_ip, str) and "," in client_ip:
+            client_ip = client_ip.split(",")[0].strip()
         
         # Determine log level based on status
         level = logger.info
