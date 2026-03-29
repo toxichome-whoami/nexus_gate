@@ -73,8 +73,8 @@ async def proxy_request(alias: str, path: str, request: Request, is_database: bo
 
                     # Convert response to FastAPI StreamingResponse
                     pass_headers = {
-                        k.lower(): v for k, v in resp.headers.items()
-                        if k.lower() not in ("transfer-encoding", "content-encoding", "connection")
+                        k.lower(): v for k, v in resp.headers.items() 
+                        if k.lower() not in ("transfer-encoding", "content-encoding", "connection", "content-length")
                     }
 
                     return StreamingResponse(
