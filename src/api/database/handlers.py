@@ -46,8 +46,29 @@ async def list_databases(request: Request, auth: AuthContext = Depends(get_auth_
                 "engine": db_cfg.engine.value,
                 "mode": db_cfg.mode.value,
                 "status": status,
-                "tables_count": len(await engine.list_tables()) if status == "connected" else 0
+                "tables_count": len(await engine.list_tables()) if status == "connected" else 0,
+                "federated": False,
             })
+
+    # Append federated databases from synced remote servers
+    if config.features.federation and config.federation.enabled:
+        from api.federation.sync import FederationState
+        state = FederationState()
+        for alias, srv_state in state.servers.items():
+            if srv_state.get("status") != "up":
+                continue
+            for db_name, db_info in srv_state.get("databases", {}).items():
+                fed_name = f"{alias}_{db_name}"
+                if "*" in auth.db_scope or fed_name in auth.db_scope:
+                    dbs.append({
+                        "name": fed_name,
+                        "engine": db_info.get("engine", "unknown") if isinstance(db_info, dict) else "unknown",
+                        "mode": db_info.get("mode", "unknown") if isinstance(db_info, dict) else "unknown",
+                        "status": db_info.get("status", "unknown") if isinstance(db_info, dict) else db_info,
+                        "tables_count": db_info.get("tables_count", 0) if isinstance(db_info, dict) else 0,
+                        "federated": True,
+                        "remote_server": alias,
+                    })
 
     return success_response(request, {"databases": dbs})
 

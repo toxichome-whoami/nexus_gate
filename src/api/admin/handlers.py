@@ -247,8 +247,29 @@ async def view_databases(request: Request, auth=Depends(require_admin)):
             "mode": db_cfg.mode.value,
             "pool_min": db_cfg.pool_min,
             "pool_max": db_cfg.pool_max,
-            "url": "***REDACTED***"
+            "url": "***REDACTED***",
+            "federated": False,
         }
+
+    # Append federated databases
+    if config.features.federation and config.federation.enabled:
+        from api.federation.sync import FederationState
+        state = FederationState()
+        for alias, srv_state in state.servers.items():
+            if srv_state.get("status") != "up":
+                continue
+            for db_name, db_info in srv_state.get("databases", {}).items():
+                fed_name = f"{alias}_{db_name}"
+                dbs[fed_name] = {
+                    "engine": db_info.get("engine", "unknown") if isinstance(db_info, dict) else "unknown",
+                    "mode": db_info.get("mode", "unknown") if isinstance(db_info, dict) else "unknown",
+                    "status": db_info.get("status", "unknown") if isinstance(db_info, dict) else db_info,
+                    "tables_count": db_info.get("tables_count", 0) if isinstance(db_info, dict) else 0,
+                    "remote_server": alias,
+                    "url": "***FEDERATED***",
+                    "federated": True,
+                }
+
     return success_response(request, {"databases": dbs})
 
 @router.post("/databases")
