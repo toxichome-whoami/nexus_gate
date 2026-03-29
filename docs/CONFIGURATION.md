@@ -182,11 +182,26 @@ Per-webhook subscription definition.
 | `enabled` | `false` | Enable federation |
 | `sync_interval` | `30` | Health sync interval in seconds |
 
+## `[federation.incoming.<node_id>]`
+
+Per-node incoming authentication. Each block allows exactly one remote server to connect.
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| `secret` | yes | Federation secret (≥32 chars, unique per node) |
+| `mode` | `"readonly"` | `readwrite \| readonly` |
+| `db_scope` | `["*"]` | Accessible database aliases |
+| `fs_scope` | `["*"]` | Accessible storage aliases |
+| `description` | `""` | Human-readable label for this node |
+
 ## `[federation.server.<alias>]`
+
+Outgoing connections to remote NexusGate servers.
 
 | Key | Required | Description |
 |-----|----------|-------------|
 | `url` | yes | Remote NexusGate base URL |
-| `api_key` | yes | API key for remote authentication |
-| `alias` | yes | Friendly alias name |
+| `secret` | yes | Federation secret (must match remote's incoming key) |
+| `node_id` | yes | Your identity on the remote server |
 | `trust_mode` | `"verify"` | `verify` (TLS) or `trust` (skip TLS check) |
+

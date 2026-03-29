@@ -49,7 +49,7 @@ async function callGateway(path, body = null, method = 'POST') {
         headers: {
             'Authorization': authHeader,
             'Content-Type': 'application/json',
-            'X-NexusGate-Webhook-Token': CONFIG.webhookSecret,
+            'X-NexusGate-Webhook-Token': Buffer.from(CONFIG.webhookSecret).toString('base64'),
             ...(body ? { 'Content-Length': Buffer.byteLength(postData) } : {})
         }
     };

@@ -1,5 +1,7 @@
 import time
 import asyncio
+import base64
+import hmac
 import structlog
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
@@ -77,8 +79,14 @@ def emit_event(
             if target in targets:
                 target_match = True
 
-        # Security Upgrade: Check if the original request provided the correct webhook secret/token
-        token_match = (trigger.webhook_token == hook.secret)
+        # Security: Verify webhook token (Base64-encoded by the client)
+        token_match = False
+        if trigger.webhook_token:
+            try:
+                decoded_token = base64.b64decode(trigger.webhook_token).decode("utf-8")
+                token_match = hmac.compare_digest(hook.secret, decoded_token)
+            except Exception:
+                token_match = False
 
         if mod_match and op_match and alias_match and target_match and token_match:
             rules_matched.append((name, hook))

@@ -4,58 +4,124 @@ Federation allows multiple NexusGate instances to link together, forming a unifi
 
 ## 1. Overview
 
-In a federated setup, a **Primary Gateway** acts as the ingress point. It "mounts" databases and storage volumes from **Remote Nodes** as if they were local resources.
+In a federated setup, a **Connector Server** (Client) proxies requests to a **Receiver Server** (Host). The Connector can query databases and storage on the Receiver as if they were local resources.
 
 **Key Features:**
 - **Unified API**: Access globally distributed data through a single URL.
-- **Automatic Prefixing**: Remote resources are automatically prefixed with the node's alias (e.g., `us_west_users_db`).
-- **Permission Mapping**: Primary nodes authenticate to remote nodes using a dedicated "Federation Key," while enforcing local permissions for the incoming client.
+- **Automatic Prefixing**: Remote resources are auto-prefixed with the node alias (e.g., `us_west_main_db`).
+- **Isolated Auth**: Federation uses its own dedicated secrets — completely separate from API keys.
+- **Per-Node Scoping**: Each incoming node has its own `mode`, `db_scope`, and `fs_scope`.
+- **One-Way by Default**: Server A connecting to Server B does NOT give Server B access to Server A. For two-way access, both servers must configure each other.
 
 ## 2. Configuration
 
-### On the Remote Node (Region US):
-Ensure you have an API key that you will provide to the Primary node.
+### On the Receiver Server (Server B — the one being connected TO):
+
+Define incoming keys for each remote node that should be allowed to connect.
 
 ```toml
-[api_key.primary_node_link]
-secret = "your_secret_here_base64"
-mode = "readwrite"
-db_scope = ["*"]
-fs_scope = ["*"]
-```
+[features]
+federation = true
 
-### On the Primary Node:
-Define the remote server under the `[federation.server.*]` section in `config.toml`.
-
-```toml
 [federation]
 enabled = true
-sync_interval = 60  # Sync remote capabilities every 60s
+sync_interval = 30
 
-[federation.server.us_west]
-url = "https://us.nexusgate.example.com"
-api_key = "primary_node_link_secret"
-alias = "us"
-trust_mode = "verify"
+# Each block = ONE remote node. Create more blocks for more servers.
+[federation.incoming.us_east_node]
+secret = "gK8xPmW2qR7nY4vB9cT1jL6hF3dA0sE"   # Min 32 chars, unique per node
+mode = "readwrite"                              # readonly | readwrite
+db_scope = ["*"]                                # ["*"] = all, or ["main_db"]
+fs_scope = ["*"]                                # ["*"] = all, or ["uploads"]
+description = "US East production node"
+
+# Example: a second node with restricted access
+[federation.incoming.eu_analytics]
+secret = "Xw9Lp2Kd7Rm4Yn6Bv3Ct1Jh8Gf5As0Eq"
+mode = "readonly"
+db_scope = ["analytics"]
+fs_scope = []
+description = "EU analytics readonly mirror"
 ```
 
-## 3. Resource Mapping
+### On the Connector Server (Server A — the one that connects):
 
-Once synced, resources from the `us_west` node will appear in the Primary node's lists:
+Define outgoing connections to the remote server.
 
-- A database named `main_db` on the US server becomes `us_main_db` on the Primary server.
-- A storage volume named `uploads` becomes `us_uploads`.
+```toml
+[features]
+federation = true
 
-Requests sent to these prefixed names are automatically proxied to the remote server, handled asynchronously, and returned through the Primary node.
+[federation]
+enabled = true
+sync_interval = 30
 
-## 4. Resilience and Failover
+[federation.server.node_b]
+url = "https://server-b.example.com"
+secret = "gK8xPmW2qR7nY4vB9cT1jL6hF3dA0sE"    # Must match Server B's incoming key
+node_id = "us_east_node"                         # Your identity on Server B
+trust_mode = "verify"                            # verify | trust (skip TLS check)
+```
 
-- **Circuit Breaker**: Each federation link is protected by a circuit breaker. If a remote node goes down, the Primary node will "trip" the circuit, returning a `FED_CIRCUIT_OPEN` error immediately rather than waiting for timeouts.
-- **Syncing**: The Primary node periodically pings the `/health` and capability endpoints of all federated servers. If a server is marked as `unhealthy`, its resources are temporarily hidden from the Primary node's lists.
-- **Timeouts**: Federation requests have their own timeout budget to prevent a slow remote node from exhausting the Primary node's connection pool.
+> **Important:** The `secret` on Server A must be the **exact same string** as the `secret` on Server B's `[federation.incoming.us_east_node]` block. The `node_id` must match the incoming block name.
 
-## 5. Security Considerations
+## 3. Authentication Flow
 
+Federation secrets are **completely separate** from API keys. They use dedicated headers:
+
+1. **Server A** sends a request with:
+   - `X-Federation-Secret`: Base64-encoded federation secret
+   - `X-Federation-Node`: The node identity (e.g., `us_east_node`)
+
+2. **Server B** receives the request:
+   - Looks up the node in `federation.incoming`
+   - Base64-decodes the secret
+   - Compares using `hmac.compare_digest()` (constant-time, timing-attack safe)
+   - If valid, creates a scoped `AuthContext` with the incoming key's permissions
+   - Federation keys can **never** have `full_admin` access
+
+3. **Config stores plain text**, transport uses Base64 — handled automatically.
+
+## 4. Resource Mapping
+
+Once synced, remote resources appear with a prefix:
+
+- A database `main_db` on Server B becomes `node_b_main_db` on Server A.
+- A storage volume `uploads` becomes `node_b_uploads`.
+
+Requests to prefixed names are automatically proxied to the remote server.
+
+## 5. Monitoring
+
+Call `GET /api/federation/servers` (requires `full_admin` API key) to see:
+
+```json
+{
+  "outgoing": [
+    { "alias": "node_b", "url": "...", "node_id": "us_east_node", "status": "up", "latency_ms": 45 }
+  ],
+  "outgoing_count": 1,
+  "incoming": [
+    { "node_id": "us_east_node", "mode": "readwrite", "db_scope": ["*"], "description": "US East" }
+  ],
+  "incoming_count": 1
+}
+```
+
+- **outgoing**: Servers this node connects TO (with live health status)
+- **incoming**: Servers allowed to connect TO this node (with their permissions)
+- Secrets are **never** exposed in responses
+
+## 6. Resilience
+
+- **Circuit Breaker**: Each federation link is protected. If a remote node goes down, it returns `FED_CIRCUIT_OPEN` immediately instead of waiting for timeouts.
+- **Health Syncing**: The connector periodically pings remote servers. Unhealthy servers have their resources temporarily hidden.
+- **Timeouts**: Federation requests have their own timeout to prevent slow remotes from exhausting connection pools.
+
+## 7. Security
+
+- **Isolated Secrets**: Federation secrets cannot be used as API keys, and vice versa.
+- **Per-Node Scoping**: Each node has independent `mode`, `db_scope`, and `fs_scope`.
+- **Key Compromise**: If one node is compromised, delete its `[federation.incoming.*]` block and restart. Only that node loses access.
+- **No Admin Access**: Federation keys always have `full_admin=false` — they cannot access `/api/admin/*` or `/api/federation/servers`.
 - **Encryption**: Always use `https` for federation URLs in production.
-- **mTLS**: For maximum security, we recommend terminating TLS at an Nginx/HAProxy layer that enforces mutual TLS between your NexusGate nodes.
-- **Rate Limiting**: Remote nodes still apply their own rate limits to the Primary gateway. Ensure the Primary gateway's key on the remote node has a sufficiently high `rate_limit_override`.

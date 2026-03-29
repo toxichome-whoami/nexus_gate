@@ -140,6 +140,17 @@ max_file_size = "100mb"
 # operation: read | write | delete | any | *
 # alias: database or storage alias name, or *
 # target: table name, file path, or *
+#
+# AUTHENTICATION:
+#   The client MUST send the webhook secret as Base64-encoded in the header:
+#     X-NexusGate-Webhook-Token: base64(secret)
+#   The gateway decodes it and verifies against the stored secret.
+#
+# DELIVERY:
+#   When NexusGate fires a webhook to your receiver URL, it sends:
+#     X-NexusGate-Signature: sha256=<HMAC-SHA256 of payload>
+#     X-NexusGate-Timestamp: <unix timestamp>
+#   Your receiver verifies the HMAC using the same secret.
 
 [webhook.on_user_insert]
 url = "https://example.com/hooks/nexusgate"
