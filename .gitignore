@@ -28,6 +28,7 @@ data/
 storage/.tmp/
 logs/
 *.log
+.env
 
 # IDE
 .vscode/
