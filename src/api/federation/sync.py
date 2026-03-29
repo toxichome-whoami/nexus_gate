@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import httpx
 import structlog
 from typing import Dict, Any
@@ -36,8 +37,10 @@ async def sync_federated_servers():
                 for alias, srv_config in config.federation.server.items():
                     url = srv_config.url.rstrip("/")
                     verify = srv_config.trust_mode == "verify"
+                    encoded_secret = base64.b64encode(srv_config.secret.encode("utf-8")).decode("utf-8")
                     headers = {
-                        "Authorization": f"Bearer {srv_config.api_key}"
+                        "X-Federation-Secret": encoded_secret,
+                        "X-Federation-Node": srv_config.node_id,
                     }
                     
                     try:

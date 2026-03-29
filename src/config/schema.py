@@ -111,15 +111,31 @@ class ApiKeyDefConfig(BaseModel):
             raise ValueError("API key secret must be at least 32 characters long")
         return v
 
+class FederationIncomingKeyConfig(BaseModel):
+    """Per-node incoming federation key with scoped access."""
+    secret: str
+    mode: ServerMode = ServerMode.READONLY
+    db_scope: List[str] = Field(default_factory=lambda: ["*"])
+    fs_scope: List[str] = Field(default_factory=lambda: ["*"])
+    description: str = ""
+
+    @field_validator('secret')
+    def validate_secret_length(cls, v):
+        if len(v) < 32:
+            raise ValueError("Federation secret must be at least 32 characters long")
+        return v
+
 class FedServerConfig(BaseModel):
+    """Outgoing federation connection to a remote server."""
     url: str
-    api_key: str
-    alias: str
+    secret: str
+    node_id: str
     trust_mode: Literal["verify", "trust"] = "verify"
 
 class FederationConfig(BaseModel):
     enabled: bool = False
     sync_interval: int = 30
+    incoming: Dict[str, FederationIncomingKeyConfig] = Field(default_factory=dict)
     server: Dict[str, FedServerConfig] = Field(default_factory=dict)
 
 class CircuitBreakerConfig(BaseModel):

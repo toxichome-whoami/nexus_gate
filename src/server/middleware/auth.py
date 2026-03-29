@@ -13,13 +13,66 @@ async def get_auth_context(
     request: Request,
     credentials: HTTPAuthorizationCredentials = Security(security),
 ) -> AuthContext:
-    """Validate API key from base64 encoded Bearer token."""
+    """Validate API key from base64 encoded Bearer token, or federation secret."""
     from security.ban_list import BanList
     from security.storage import SecurityStorage
     import hashlib
 
     config = ConfigManager.get()
 
+    # ── Federation Secret Auth (separate path) ──────────────────
+    fed_secret = request.headers.get("X-Federation-Secret")
+    fed_node = request.headers.get("X-Federation-Node")
+
+    if fed_secret and fed_node:
+        # Only allow if federation is enabled
+        if not config.features.federation or not config.federation.enabled:
+            raise NexusGateException(
+                code=ErrorCodes.AUTH_INVALID_KEY,
+                message="Federation is disabled on this instance.",
+                status_code=403,
+            )
+
+        incoming_key = config.federation.incoming.get(fed_node)
+        if not incoming_key:
+            raise NexusGateException(
+                code=ErrorCodes.AUTH_INVALID_KEY,
+                message="Unknown federation node.",
+                status_code=403,
+            )
+
+        # Constant-time comparison to prevent timing attacks
+        # Secret is Base64-encoded in transit, decode before comparing
+        try:
+            decoded_fed_secret = base64.b64decode(fed_secret).decode("utf-8")
+        except Exception:
+            raise NexusGateException(
+                code=ErrorCodes.AUTH_INVALID_FORMAT,
+                message="Malformed federation secret.",
+                status_code=403,
+            )
+
+        if not hmac.compare_digest(
+            incoming_key.secret.encode("utf-8"),
+            decoded_fed_secret.encode("utf-8"),
+        ):
+            raise NexusGateException(
+                code=ErrorCodes.AUTH_INVALID_SECRET,
+                message="Invalid federation secret.",
+                status_code=403,
+            )
+
+        # Return scoped AuthContext based on the incoming key's permissions
+        return AuthContext(
+            api_key_name=f"federation:{fed_node}",
+            mode=incoming_key.mode,
+            db_scope=incoming_key.db_scope,
+            fs_scope=incoming_key.fs_scope,
+            rate_limit_override=0,
+            full_admin=False,  # Federation nodes are NEVER admin
+        )
+
+    # ── Standard Bearer Token Auth ──────────────────────────────
     encoded_token = credentials.credentials
     try:
         decoded_token = base64.b64decode(encoded_token).decode("utf-8")

@@ -1,3 +1,4 @@
+import base64
 import httpx
 from fastapi import Request
 from starlette.responses import StreamingResponse
@@ -48,8 +49,10 @@ async def proxy_request(alias: str, path: str, request: Request, is_database: bo
             headers.pop("host", None)
             headers.pop("content-length", None) # Let httpx handle it
             
-            # Auth with the federation api key, mapping our identity
-            headers["Authorization"] = f"Bearer {srv_config.api_key}"
+            # Auth with the federation secret (Base64 encoded for transport)
+            encoded_secret = base64.b64encode(srv_config.secret.encode("utf-8")).decode("utf-8")
+            headers["X-Federation-Secret"] = encoded_secret
+            headers["X-Federation-Node"] = srv_config.node_id
             # Pass original request id
             headers["X-Request-ID"] = getattr(request.state, "request_id", "-")
             
