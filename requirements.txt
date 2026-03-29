@@ -11,6 +11,7 @@ aiofiles>=23.2.1
 zipstream-ng>=1.7.1
 python-multipart>=0.0.9
 python-magic>=0.4.27
+python-magic-bin>=0.4.14; sys_platform == 'win32'
 sqlglot>=23.0.0
 SQLAlchemy[asyncio]>=2.0.28
 asyncpg>=0.29.0
