@@ -7,7 +7,7 @@ class QueryRequest(BaseModel):
     timeout: Optional[int] = None
 
 class InsertRequest(BaseModel):
-    rows: Optional[List[Dict[str, Any]]] = None
+    rows: Optional[List[Dict[str, Any]]] = Field(default=None, max_length=1000, description="Max 1000 rows per batch to prevent memory saturation.")
     row: Optional[Dict[str, Any]] = None
 
 class UpdateRequest(BaseModel):

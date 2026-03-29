@@ -1,10 +1,11 @@
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import ORJSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from config.loader import ConfigManager
 from server.lifespan import lifespan
+from server.middleware.security import SecurityMiddleware
 from server.middleware.security_headers import SecurityHeadersMiddleware
 from server.middleware.request_id import RequestIDMiddleware
 from server.middleware.waf import WAFMiddleware
@@ -21,7 +22,6 @@ from api.admin import router as admin_router
 
 def create_app() -> FastAPI:
     config = ConfigManager.get()
-
     app = FastAPI(
         title="NexusGate",
         description="High-Performance Unified API Gateway with Dynamic Federation, Webhooks & Storage Management",
@@ -30,6 +30,7 @@ def create_app() -> FastAPI:
         docs_url="/api/docs",
         redoc_url=None,
         openapi_url="/api/spec",
+        default_response_class=ORJSONResponse
     )
 
     @app.middleware("http")
@@ -38,7 +39,7 @@ def create_app() -> FastAPI:
         if path.startswith("/api/docs") or path.startswith("/api/spec"):
             cfg = ConfigManager.get()
             if not cfg.features.playground:
-                return JSONResponse(
+                return ORJSONResponse(
                     status_code=404,
                     content={
                         "success": False,
@@ -55,6 +56,7 @@ def create_app() -> FastAPI:
     # Outermost (runs first): Logging
     app.add_middleware(LoggingMiddleware)
     app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(SecurityMiddleware)
     app.add_middleware(IdempotencyMiddleware)
     app.add_middleware(WAFMiddleware)
     setup_cors(app)
@@ -71,7 +73,7 @@ def create_app() -> FastAPI:
     # Add custom exception handlers
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request, exc):
-        return JSONResponse(
+        return ORJSONResponse(
             status_code=exc.status_code,
             content={
                 "success": False,
@@ -89,7 +91,7 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request, exc):
-        return JSONResponse(
+        return ORJSONResponse(
             status_code=422,
             content={
                 "success": False,
