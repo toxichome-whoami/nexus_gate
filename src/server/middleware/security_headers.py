@@ -15,11 +15,8 @@ class SecurityHeadersMiddleware:
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
                 headers = message.setdefault("headers", [])
-                
-                # Path-aware Security Headers
-                path = scope.get("path", "")
-                is_docs = path.startswith("/api/docs") or path.startswith("/api/spec")
-                
+
+                # OWASP Security Headers
                 security_headers = [
                     (b"x-content-type-options", b"nosniff"),
                     (b"x-frame-options", b"DENY"),
@@ -30,15 +27,11 @@ class SecurityHeadersMiddleware:
                     (b"permissions-policy", b"interest-cohort=()"),
                 ]
 
-                # Strict CSP by default, relaxed for Swagger UI
-                if is_docs:
-                    security_headers.append((
-                        b"content-security-policy", 
-                        b"default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https://fastapi.tiangolo.com"
-                    ))
-                else:
+                # Add strict CSP only for non-documentation endpoints
+                path = scope.get("path", "")
+                if not (path.startswith("/api/docs") or path.startswith("/api/spec")):
                     security_headers.append((b"content-security-policy", b"default-src 'none'"))
-                
+
                 # Append security headers if they don't already exist
                 existing_keys = {k.lower() for k, v in headers}
                 for key, value in security_headers:

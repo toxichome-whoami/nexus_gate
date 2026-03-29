@@ -74,6 +74,6 @@ class MemoryCache:
             "backend": "memory",
             "size_items": cache.currsize,
             "max_items": cache.maxsize,
-            "hits": cache.hits,
-            "misses": cache.misses
+            "hits": getattr(cache, "hits", 0),
+            "misses": getattr(cache, "misses", 0)
         }
