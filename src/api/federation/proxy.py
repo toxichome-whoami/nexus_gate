@@ -6,14 +6,14 @@ from starlette.responses import StreamingResponse
 from config.loader import ConfigManager
 from api.errors import NexusGateException, ErrorCodes
 
-# Shared client
-_client = None
+# Shared clients (one per trust mode)
+_clients: dict = {}
 
-def get_proxy_client() -> httpx.AsyncClient:
-    global _client
-    if _client is None:
-        _client = httpx.AsyncClient(timeout=30.0)
-    return _client
+def get_proxy_client(verify_ssl: bool = True) -> httpx.AsyncClient:
+    global _clients
+    if verify_ssl not in _clients:
+        _clients[verify_ssl] = httpx.AsyncClient(timeout=30.0, verify=verify_ssl)
+    return _clients[verify_ssl]
 
 async def proxy_request(alias: str, path: str, request: Request, is_database: bool = True):
     """
@@ -57,8 +57,8 @@ async def proxy_request(alias: str, path: str, request: Request, is_database: bo
             headers["X-Request-ID"] = getattr(request.state, "request_id", "-")
             
             # 4. Stream response back
-            client = get_proxy_client()
-            verify = srv_config.trust_mode == "verify"
+            verify_ssl = srv_config.trust_mode == "verify"
+            client = get_proxy_client(verify_ssl)
             
             async def proxy_streamer():
                 req = client.build_request(
@@ -68,7 +68,7 @@ async def proxy_request(alias: str, path: str, request: Request, is_database: bo
                     content=request.stream() if request.method in ("POST", "PUT", "PATCH") else None
                 )
                 try:
-                    resp = await client.send(req, stream=True, verify=verify)
+                    resp = await client.send(req, stream=True)
                     
                     # Convert response to FastAPI StreamingResponse
                     # Ensure headers are passed through safely
