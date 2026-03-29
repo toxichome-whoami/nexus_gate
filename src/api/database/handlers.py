@@ -14,6 +14,16 @@ from db.dialect.transpiler import transpile_sql
 from api.database.filter_builder import build_where_clause
 
 from .router import router
+from api.federation.proxy import proxy_request
+
+def _is_federated(alias: str) -> bool:
+    config = ConfigManager.get()
+    if not config.features.federation or not config.federation.enabled:
+        return False
+    for srv_alias in config.federation.server.keys():
+        if alias.startswith(f"{srv_alias}_"):
+            return True
+    return False
 
 async def get_db_engine(db_name: str, auth: AuthContext):
     # Check scope
@@ -78,6 +88,9 @@ async def list_tables(
     db_name: str = Path(...),
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(db_name):
+        return await proxy_request(db_name, "tables", request, True)
+
     if auth.mode == ServerMode.WRITEONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Write-only keys cannot list tables", 403)
 
@@ -105,6 +118,9 @@ async def execute_query(
     db_name: str = Path(...),
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(db_name):
+        return await proxy_request(db_name, "query", request, True)
+
     engine, db_cfg = await get_db_engine(db_name, auth)
 
     # Parse and validate AST
@@ -142,6 +158,9 @@ async def get_rows(
     params: FetchRowsParams = Depends(),
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(db_name):
+        return await proxy_request(db_name, f"{table_name}/rows", request, True)
+
     if auth.mode == ServerMode.WRITEONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Write-only keys cannot read rows", 403)
 
@@ -188,6 +207,9 @@ async def insert_rows(
     table_name: str = Path(...),
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(db_name):
+        return await proxy_request(db_name, f"{table_name}/rows", request, True)
+
     if auth.mode == ServerMode.READONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Read-only keys cannot insert rows", 403)
 
@@ -230,6 +252,9 @@ async def update_rows(
     table_name: str = Path(...),
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(db_name):
+        return await proxy_request(db_name, f"{table_name}/rows", request, True)
+
     if auth.mode == ServerMode.READONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Read-only keys cannot update rows", 403)
 
@@ -264,6 +289,9 @@ async def delete_rows(
     table_name: str = Path(...),
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(db_name):
+        return await proxy_request(db_name, f"{table_name}/rows", request, True)
+
     if auth.mode == ServerMode.READONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Read-only keys cannot delete rows", 403)
 

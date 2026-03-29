@@ -14,6 +14,16 @@ from .file_ops import get_file_info, rename_path, copy_path, delete_path, mkdir
 from .streaming import serve_file
 from .archive import stream_zip_folder
 from .image_processor import process_image_and_stream
+from api.federation.proxy import proxy_request
+
+def _is_federated(alias: str) -> bool:
+    config = ConfigManager.get()
+    if not config.features.federation or not config.federation.enabled:
+        return False
+    for srv_alias in config.federation.server.keys():
+        if alias.startswith(f"{srv_alias}_"):
+            return True
+    return False
 
 def _get_storage_path(alias: str, rel_path: str, auth: AuthContext) -> str:
     if "*" not in auth.fs_scope and alias not in auth.fs_scope:
@@ -80,6 +90,9 @@ async def list_folder(
     recursive: bool = Query(False),
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(alias):
+        return await proxy_request(alias, f"list", request, False)
+
     target_path = _get_storage_path(alias, path, auth)
 
     if not os.path.exists(target_path):
@@ -111,6 +124,9 @@ async def download_file(
     format: Optional[str] = Query(None),
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(alias):
+        return await proxy_request(alias, f"download", request, False)
+
     target_path = _get_storage_path(alias, path, auth)
 
     if os.path.isdir(target_path):
@@ -127,6 +143,9 @@ async def upload_file(
     alias: str = Path(...),
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(alias):
+        return await proxy_request(alias, f"upload", request, False)
+
     if auth.mode == ServerMode.READONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Read-only keys cannot execute storage uploads", 403)
 
@@ -255,6 +274,9 @@ async def execute_action(
     body: ActionRequest = ...,
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(alias):
+        return await proxy_request(alias, f"action", request, False)
+
     if auth.mode == ServerMode.READONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Read-only keys cannot execute storage actions", 403)
 
