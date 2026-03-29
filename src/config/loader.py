@@ -48,7 +48,9 @@ class ConfigManager:
     @classmethod
     def get(cls) -> NexusGateConfig:
         if cls._config is None:
-            raise RuntimeError("Config not loaded. Call ConfigManager.load() first.")
+            # raise RuntimeError("Config not loaded. Call ConfigManager.load() first.")
+            # Auto-load default config if not already loaded
+            return cls.load()
         return cls._config
 
     @classmethod
@@ -64,13 +66,13 @@ class ConfigManager:
                 try:
                     with open(cls._config_path, "rb") as f:
                         toml_dict = tomllib.load(f)
-                    
+
                     new_config = NexusGateConfig(**toml_dict)
-                    
+
                     # Store old config to compare what changed
                     old_config = cls._config
                     cls._config = new_config
-                    
+
                     # In a real app we'd dispatch events here for hot-reloadable parts
                     logger.info("Config reloaded successfully")
                 except Exception as e:
