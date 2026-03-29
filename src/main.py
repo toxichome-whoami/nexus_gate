@@ -7,9 +7,9 @@ def main():
     config_path = "config.toml"
     if len(sys.argv) > 1 and sys.argv[1] == "--config":
         config_path = sys.argv[2]
-        
+
     config = ConfigManager.load(config_path)
-    
+
     uvicorn.run(
         "server.app:create_app",
         host=config.server.host,
