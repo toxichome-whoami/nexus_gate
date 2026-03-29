@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 async def list_api_keys(request: Request, auth=Depends(require_admin)):
     config = ConfigManager.get()
     keys = []
-    
+
     # 1. Static keys
     for name, key_cfg in config.api_key.items():
         keys.append({
@@ -38,7 +38,7 @@ async def list_api_keys(request: Request, auth=Depends(require_admin)):
             "rate_limit_override": key_cfg.rate_limit_override,
             "full_admin": key_cfg.full_admin
         })
-        
+
     # 2. Dynamic DB keys
     db_keys = SecurityStorage.get_all_keys()
     for name, key_data in db_keys.items():
@@ -51,7 +51,7 @@ async def list_api_keys(request: Request, auth=Depends(require_admin)):
             "rate_limit_override": key_data["rate_limit_override"],
             "full_admin": key_data["full_admin"]
         })
-        
+
     return success_response(request, {"keys": keys})
 
 
@@ -81,7 +81,7 @@ async def create_api_key(
 
     # Hash secret for DB storage
     secret_hash = hashlib.sha256(raw_secret.encode("utf-8")).hexdigest()
-    
+
     await SecurityStorage.add_api_key(
         name=name,
         secret_hash=secret_hash,
@@ -113,17 +113,20 @@ async def revoke_api_key(
     key_name: str = Path(...),
     auth=Depends(require_admin),
 ):
+    if key_name == auth.api_key_name:
+        raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, "You cannot revoke your own active API key", 400)
+
     config = ConfigManager.get()
-    
+
     # DB Keys
     deleted_from_db = await SecurityStorage.delete_api_key(key_name)
-    
+
     # If it's a static key, we can't delete it from file automatically, so we ban it
     banned = False
     if key_name in config.api_key:
         await BanList.ban_key(key_name, reason="Revoked via admin API", duration_seconds=None)
         banned = True
-        
+
     if not deleted_from_db and not banned:
         raise NexusGateException(ErrorCodes.AUTH_INVALID_KEY, f"Key '{key_name}' not found", 404)
 
@@ -167,6 +170,9 @@ async def ban_key(request: Request, body: dict = Body(...), auth=Depends(require
 
     if not key_name:
         raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "key_name is required", 400)
+
+    if key_name == auth.api_key_name:
+        raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, "You cannot ban your own active API key (self-lockout protection)", 400)
 
     await BanList.ban_key(key_name, reason=reason, duration_seconds=duration)
     return success_response(request, {"banned_key": key_name, "reason": reason})
@@ -235,7 +241,7 @@ async def view_webhooks(request: Request, auth=Depends(require_admin)):
 async def view_config(request: Request, auth=Depends(require_admin)):
     config = ConfigManager.get()
     data = config.model_dump()
-    
+
     # Mask secrets
     for key_name in data.get("api_key", {}):
         data["api_key"][key_name]["secret"] = "***REDACTED***"
@@ -245,7 +251,7 @@ async def view_config(request: Request, auth=Depends(require_admin)):
         data["database"][db_name]["url"] = "***REDACTED***"
     for srv_name in data.get("federation", {}).get("server", {}):
         data["federation"]["server"][srv_name]["api_key"] = "***REDACTED***"
-        
+
     return success_response(request, {"config": data})
 
 
@@ -255,17 +261,17 @@ async def view_config(request: Request, auth=Depends(require_admin)):
 async def view_rate_limits(request: Request, auth=Depends(require_admin)):
     config = ConfigManager.get()
     overrides = {}
-    
+
     # Static keys
     for name, cfg in config.api_key.items():
         if cfg.rate_limit_override > 0:
             overrides[name] = {"rate_limit_override": cfg.rate_limit_override, "source": "config"}
-            
+
     # Dynamic keys
     for name, cfg in SecurityStorage.get_all_keys().items():
         if cfg["rate_limit_override"] > 0:
             overrides[name] = {"rate_limit_override": cfg["rate_limit_override"], "source": "sqlite"}
-            
+
     return success_response(request, {
         "global": {
             "window": config.rate_limit.window,
