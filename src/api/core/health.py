@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import psutil
 
+from __init__ import __version__
 from config.loader import ConfigManager
 from api.responses import success_response
 

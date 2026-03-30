@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from __init__ import __version__
 from config.loader import ConfigManager
 from server.lifespan import lifespan
 from server.middleware.security import SecurityMiddleware

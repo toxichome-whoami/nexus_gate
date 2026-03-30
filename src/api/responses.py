@@ -2,6 +2,7 @@ from typing import Any, Dict, Optional
 import time
 from fastapi import Request
 
+from __init__ import __version__
 from utils.types import ResponseEnvelope, RequestMeta, ErrorDetails
 from config.loader import ConfigManager
 
@@ -10,7 +11,6 @@ def _get_meta(request: Request, start_time: Optional[float] = None) -> RequestMe
         start_time = getattr(request.state, "start_time", time.perf_counter())
 
     duration_ms = (time.perf_counter() - start_time) * 1000
-    from __init__ import __version__ as version # need to create later
 
     server_name = ConfigManager.get().server.host
 
@@ -19,7 +19,7 @@ def _get_meta(request: Request, start_time: Optional[float] = None) -> RequestMe
         timestamp=time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
         duration_ms=round(duration_ms, 2),
         server=server_name,
-        version=version
+        version=__version__
     )
 
 def success_response(request: Request, data: Any, links: Optional[Dict[str, str]] = None, start_time: Optional[float] = None) -> dict:
