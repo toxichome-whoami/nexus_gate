@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from fastapi.responses import ORJSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -30,7 +30,6 @@ def create_app() -> FastAPI:
         docs_url="/api/docs",
         redoc_url=None,
         openapi_url="/api/spec",
-        default_response_class=ORJSONResponse
     )
 
     @app.middleware("http")
@@ -39,7 +38,7 @@ def create_app() -> FastAPI:
         if path.startswith("/api/docs") or path.startswith("/api/spec"):
             cfg = ConfigManager.get()
             if not cfg.features.playground:
-                return ORJSONResponse(
+                return JSONResponse(
                     status_code=404,
                     content={
                         "success": False,
@@ -73,7 +72,7 @@ def create_app() -> FastAPI:
     # Add custom exception handlers
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request, exc):
-        return ORJSONResponse(
+        return JSONResponse(
             status_code=exc.status_code,
             content={
                 "success": False,
@@ -91,7 +90,7 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request, exc):
-        return ORJSONResponse(
+        return JSONResponse(
             status_code=422,
             content={
                 "success": False,
