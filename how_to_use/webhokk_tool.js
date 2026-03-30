@@ -55,7 +55,7 @@ async function callGateway(path, body = null, method = 'POST') {
     };
 
     return new Promise((resolve, reject) => {
-        const parsedUrl = new URL(CONFIG.url);
+        const parsedUrl = new URL(CONFIG.baseUrl);
         const lib = parsedUrl.protocol === 'https:' ? https : http;
         const req = lib.request(url, options, (res) => {
             let data = '';
