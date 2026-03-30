@@ -25,7 +25,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="NexusGate",
         description="High-Performance Unified API Gateway with Dynamic Federation, Webhooks & Storage Management",
-        version="1.0.0",
+        version=__version__,
         lifespan=lifespan,
         docs_url="/api/docs",
         redoc_url=None,
