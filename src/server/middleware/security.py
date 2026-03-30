@@ -7,8 +7,11 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         # Pre-process payload size optionally (Max 5MB raw stream abort to prevent memory bombs)
         # Note: Starlette does not read the body here, so it is O(1) pure header check.
+        # Bypass for storage uploads — chunked uploads handle large files safely
+        path = request.url.path
+        is_upload = path.startswith("/api/fs/")
         content_length = request.headers.get('content-length')
-        if content_length and int(content_length) > 5_242_880: # 5MB limit
+        if content_length and int(content_length) > 5_242_880 and not is_upload:  # 5MB limit
             from starlette.responses import JSONResponse
             return JSONResponse(
                 {"success": False, "error": {"code": "PAYLOAD_TOO_LARGE", "message": "Max 5MB payload limit exceeded."}},
