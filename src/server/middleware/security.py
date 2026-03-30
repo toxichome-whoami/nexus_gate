@@ -31,8 +31,10 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
             headers["Pragma"] = "no-cache"
 
-        # Content-Security-Policy (Airtight API only restriction unless serving standard images)
+        # Content-Security-Policy (Airtight API only restriction, bypass for Swagger UI)
         if not headers.get("Content-Security-Policy"):
-            headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+            path = request.url.path
+            if not (path.startswith("/api/docs") or path.startswith("/api/spec") or path.startswith("/docs") or path.startswith("/redoc")):
+                headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
 
         return response
