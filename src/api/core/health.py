@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import psutil
 
+from __init__ import __version__
 from config.loader import ConfigManager
 from api.responses import success_response
 
@@ -15,15 +16,15 @@ uptime_start = time.time()
 async def root(request: Request):
     """Server status."""
     config = ConfigManager.get()
-    
+
     data = {
         "status": "online",
         "name": "NexusGate",
-        "version": "1.0.0",
+        "version": __version__,
         "uptime_seconds": int(time.time() - uptime_start),
         "features": config.features.model_dump()
     }
-    
+
     return success_response(request, data)
 
 @router.get("/ready")
@@ -35,7 +36,7 @@ async def ready(request: Request):
 async def health(request: Request):
     """Detailed health of subsystems."""
     config = ConfigManager.get()
-    
+
     # Ping DB Pools
     from db.pool import DatabasePoolManager
     db_status = {}
@@ -45,12 +46,12 @@ async def health(request: Request):
         is_up = await engine.health_check() if engine else False
         db_status[alias] = "up" if is_up else "down"
         if not is_up: all_dbs_up = False
-            
+
     # Ping Caches
     from cache.__init__ import CacheManager
     from cache.memory import MemoryCache
     from cache.redis_backend import RedisCache
-    
+
     cache_status = {"enabled": config.cache.enabled}
     if config.cache.enabled:
         cache_status["backend"] = config.cache.backend
@@ -63,7 +64,7 @@ async def health(request: Request):
                 cache_status["status"] = "down"
         else:
             cache_status.update(MemoryCache.stats())
-            
+
     # Check Storages
     storage_status = {}
     for alias, sc in config.storage.items():
@@ -73,7 +74,7 @@ async def health(request: Request):
             storage_status[alias] = {"status": "up", "free_space_bytes": free_bytes}
         else:
             storage_status[alias] = {"status": "down"}
-            
+
     data = {
         "status": "healthy" if all_dbs_up else "degraded",
         "checks": {
@@ -88,5 +89,5 @@ async def health(request: Request):
             "cpu_percent": psutil.Process(os.getpid()).cpu_percent(),
         }
     }
-    
+
     return success_response(request, data)

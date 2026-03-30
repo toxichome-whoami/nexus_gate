@@ -140,6 +140,17 @@ max_file_size = "100mb"
 # operation: read | write | delete | any | *
 # alias: database or storage alias name, or *
 # target: table name, file path, or *
+#
+# AUTHENTICATION:
+#   The client MUST send the webhook secret as Base64-encoded in the header:
+#     X-NexusGate-Webhook-Token: base64(secret)
+#   The gateway decodes it and verifies against the stored secret.
+#
+# DELIVERY:
+#   When NexusGate fires a webhook to your receiver URL, it sends:
+#     X-NexusGate-Signature: sha256=<HMAC-SHA256 of payload>
+#     X-NexusGate-Timestamp: <unix timestamp>
+#   Your receiver verifies the HMAC using the same secret.
 
 [webhook.on_user_insert]
 url = "https://example.com/hooks/nexusgate"
@@ -155,13 +166,35 @@ enabled = true
 
 # ─── Federation ───────────────────────────────
 # Connect multiple NexusGate instances into a mesh.
+# Federation uses its own isolated secrets — NOT your API keys.
 
 [federation]
 enabled = false
 sync_interval = 30            # Seconds between health syncs
 
+# ─── Incoming Federation Keys ─────────────────
+# Each block allows ONE remote node to connect to this server.
+# Each key has its own mode + scope. To allow more servers, add more blocks.
+
+[federation.incoming.us_east_node]
+secret = "CHANGE_ME_unique_federation_secret_at_least_32_chars"
+mode = "readwrite"            # readonly | readwrite
+db_scope = ["*"]              # ["*"] = all databases, or ["main_db", "analytics"]
+fs_scope = ["*"]              # ["*"] = all storage, or ["uploads"]
+description = "US East production node"
+
+# [federation.incoming.eu_mirror]
+# secret = "CHANGE_ME_another_unique_secret_for_this_node_only"
+# mode = "readonly"
+# db_scope = ["analytics"]
+# fs_scope = []
+# description = "EU analytics readonly mirror"
+
+# ─── Outgoing Server Connections ──────────────
+# Connect this server to a remote NexusGate instance.
+
 [federation.server.edge_us]
 url = "https://nexusgate-us.example.com"
-api_key = "remote_admin_api_key"
-alias = "us_node"
+secret = "MUST_MATCH_the_remote_servers_incoming_key_secret"
+node_id = "us_east_node"      # Your identity on the remote server
 trust_mode = "verify"         # verify | trust (trust skips TLS cert check)

@@ -1,7 +1,7 @@
 import structlog
 import asyncio
 from typing import Any, Optional
-import json
+import orjson
 
 try:
     import redis.asyncio as redis
@@ -44,8 +44,8 @@ class RedisCache:
         val = await client.get(key)
         if val is not None:
             try:
-                return json.loads(val)
-            except json.JSONDecodeError:
+                return orjson.loads(val)
+            except Exception:
                 return val
         return None
         
@@ -55,8 +55,8 @@ class RedisCache:
         config = ConfigManager.get()
         ttl = int(ttl) if ttl is not None else config.cache.default_ttl
         
-        if not isinstance(value, str):
-            value = json.dumps(value)
+        if not isinstance(value, (str, bytes)):
+            value = orjson.dumps(value)
             
         await client.setex(key, ttl, value)
         

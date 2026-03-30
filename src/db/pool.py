@@ -54,8 +54,14 @@ class DatabasePoolManager:
         logger.info("Shutting down database pools")
         for alias, engine in cls._engines.items():
             logger.info("Closing pool", alias=alias)
-            await engine.disconnect()
+            try:
+                await engine.disconnect()
+            except (RuntimeError, Exception) as e:
+                # aiomysql/uvloop can throw RuntimeError when TCP transport
+                # is already closed during CTRL+C shutdown — safe to ignore
+                logger.debug("Pool close warning (safe to ignore)", alias=alias, error=str(e))
         cls._engines.clear()
+        logger.info("Shutdown complete")
 
     @classmethod
     async def remove_engine(cls, alias: str):

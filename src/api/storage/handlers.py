@@ -1,5 +1,9 @@
 import os
+import httpx
+import base64
+import asyncio
 from fastapi import APIRouter, Depends, Request, Query, Path
+from api.federation.sync import FederationState
 from typing import Optional, List
 
 from config.loader import ConfigManager
@@ -14,6 +18,16 @@ from .file_ops import get_file_info, rename_path, copy_path, delete_path, mkdir
 from .streaming import serve_file
 from .archive import stream_zip_folder
 from .image_processor import process_image_and_stream
+from api.federation.proxy import proxy_request
+
+def _is_federated(alias: str) -> bool:
+    config = ConfigManager.get()
+    if not config.features.federation or not config.federation.enabled:
+        return False
+    for srv_alias in config.federation.server.keys():
+        if alias.startswith(f"{srv_alias}_"):
+            return True
+    return False
 
 def _get_storage_path(alias: str, rel_path: str, auth: AuthContext) -> str:
     if "*" not in auth.fs_scope and alias not in auth.fs_scope:
@@ -48,8 +62,65 @@ async def list_storages(request: Request, auth: AuthContext = Depends(get_auth_c
                 "status": "available" if os.path.exists(storage_cfg.path) else "unavailable",
                 "limit": storage_cfg.limit,
                 "chunk_size": storage_cfg.chunk_size,
-                "max_file_size": storage_cfg.max_file_size
+                "max_file_size": storage_cfg.max_file_size,
+                "federated": False,
             })
+
+    # Append federated storages from synced remote servers
+    if config.features.federation and config.federation.enabled:
+        state = FederationState()
+        
+        async def fetch_remote_storages(alias, srv_state):
+            if srv_state.get("status") != "up" or alias not in config.federation.server:
+                return
+                
+            srv_config = config.federation.server[alias]
+            remote_storages = srv_state.get("storages", {})
+            
+            try:
+                url = srv_config.url.rstrip("/")
+                encoded_secret = base64.b64encode(srv_config.secret.encode("utf-8")).decode("utf-8")
+                headers = {"X-Federation-Secret": encoded_secret, "X-Federation-Node": srv_config.node_id}
+                
+                async with httpx.AsyncClient(verify=srv_config.trust_mode == "verify", timeout=5) as client:
+                    resp = await client.get(f"{url}/api/fs/storages", headers=headers)
+                    if resp.status_code == 200:
+                        fs_data = resp.json().get("data", {}).get("storages", [])
+                        new_storages = {}
+                        for fs in fs_data:
+                            if fs.get("federated"): continue
+                            fs_name = fs.get("name")
+                            health_status = remote_storages.get(fs_name, {})
+                            new_storages[fs_name] = {
+                                "status": health_status.get("status", "available") if isinstance(health_status, dict) else health_status,
+                                "mode": fs.get("mode", "proxy"),
+                                "limit": fs.get("limit", "10GB"),
+                                "chunk_size": fs.get("chunk_size", "10MB"),
+                                "max_file_size": fs.get("max_file_size", "100MB"),
+                            }
+                        remote_storages = new_storages
+            except Exception:
+                pass
+                
+            for storage_name, storage_status in remote_storages.items():
+                fed_name = f"{alias}_{storage_name}"
+                if "*" in auth.fs_scope or fed_name in auth.fs_scope:
+                    is_dict = isinstance(storage_status, dict)
+                    raw_status = storage_status.get("status", "available") if is_dict else storage_status
+                    storages.append({
+                        "name": fed_name,
+                        "mode": storage_status.get("mode", "proxy") if is_dict else "proxy",
+                        "status": "available" if raw_status == "up" else raw_status,
+                        "limit": storage_status.get("limit", "10GB") if is_dict else "10GB",
+                        "chunk_size": storage_status.get("chunk_size", "10MB") if is_dict else "10MB",
+                        "max_file_size": storage_status.get("max_file_size", "100MB") if is_dict else "100MB",
+                        "federated": True,
+                        "remote_server": alias,
+                    })
+
+        tasks = [fetch_remote_storages(alias, srv_state) for alias, srv_state in state.servers.items()]
+        if tasks:
+            await asyncio.gather(*tasks)
 
     return success_response(request, {"storages": storages})
 
@@ -61,6 +132,9 @@ async def list_folder(
     recursive: bool = Query(False),
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(alias):
+        return await proxy_request(alias, f"list", request, False)
+
     target_path = _get_storage_path(alias, path, auth)
 
     if not os.path.exists(target_path):
@@ -92,6 +166,9 @@ async def download_file(
     format: Optional[str] = Query(None),
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(alias):
+        return await proxy_request(alias, f"download", request, False)
+
     target_path = _get_storage_path(alias, path, auth)
 
     if os.path.isdir(target_path):
@@ -108,6 +185,9 @@ async def upload_file(
     alias: str = Path(...),
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(alias):
+        return await proxy_request(alias, f"upload", request, False)
+
     if auth.mode == ServerMode.READONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Read-only keys cannot execute storage uploads", 403)
 
@@ -236,6 +316,9 @@ async def execute_action(
     body: ActionRequest = ...,
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(alias):
+        return await proxy_request(alias, f"action", request, False)
+
     if auth.mode == ServerMode.READONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Read-only keys cannot execute storage actions", 403)
 

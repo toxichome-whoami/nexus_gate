@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import httpx
 import structlog
 from typing import Dict, Any
@@ -30,41 +31,47 @@ async def sync_federated_servers():
     state = FederationState()
     interval = config.federation.sync_interval
     
-    async with httpx.AsyncClient() as client:
-        while True:
-            try:
-                for alias, srv_config in config.federation.server.items():
-                    url = srv_config.url.rstrip("/")
-                    verify = srv_config.trust_mode == "verify"
-                    headers = {
-                        "Authorization": f"Bearer {srv_config.api_key}"
-                    }
-                    
-                    try:
-                        # Ping health
-                        resp = await client.get(f"{url}/health", headers=headers, verify=verify, timeout=5)
+    while True:
+        try:
+            for alias, srv_config in config.federation.server.items():
+                url = srv_config.url.rstrip("/")
+                verify_ssl = srv_config.trust_mode == "verify"
+                encoded_secret = base64.b64encode(srv_config.secret.encode("utf-8")).decode("utf-8")
+                headers = {
+                    "X-Federation-Secret": encoded_secret,
+                    "X-Federation-Node": srv_config.node_id,
+                }
+                
+                try:
+                    async with httpx.AsyncClient(verify=verify_ssl, timeout=10) as client:
+                        resp = await client.get(f"{url}/health", headers=headers)
                         resp.raise_for_status()
                         health_data = resp.json()
                         
-                        # Just storing basic info for now
-                        state.servers[alias] = {
-                            "status": "up",
-                            "latency_ms": health_data.get("meta", {}).get("duration_ms", 0),
-                            "databases": health_data.get("data", {}).get("checks", {}).get("databases", {}),
-                            "storages": health_data.get("data", {}).get("checks", {}).get("storages", {})
-                        }
-                        
-                    except httpx.HTTPError as e:
-                        logger.warning("Failed to sync with federated server", alias=alias, error=str(e))
-                        state.servers[alias] = {
-                            "status": "down",
-                            "error": str(e)
-                        }
-                        
-                await asyncio.sleep(interval)
-            except asyncio.CancelledError:
-                logger.info("Federation sync shutting down")
-                break
-            except Exception as e:
-                logger.error("Federation sync error", error=str(e))
-                await asyncio.sleep(interval)
+                        latency = health_data.get("meta", {}).get("duration_ms", 0)
+                        health_dbs = health_data.get("data", {}).get("checks", {}).get("databases", {})
+                        health_storages = health_data.get("data", {}).get("checks", {}).get("storages", {})
+
+                    state.servers[alias] = {
+                        "status": "up",
+                        "latency_ms": latency,
+                        "databases": health_dbs,
+                        "storages": health_storages,
+                    }
+                    
+                except httpx.HTTPError as e:
+                    logger.warning("Failed to sync with federated server", alias=alias, error=str(e))
+                    state.servers[alias] = {
+                        "status": "down",
+                        "error": str(e)
+                    }
+                    
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            logger.info("Federation sync shutting down")
+            break
+        except Exception as e:
+            logger.error("Federation sync error", error=str(e))
+            await asyncio.sleep(interval)
+
+

@@ -41,7 +41,11 @@ async function request(path, method, body = null) {
             res.on('data', (chunk) => resData += chunk);
             res.on('end', () => {
                 if (res.statusCode >= 200 && res.statusCode < 300) {
-                    resolve(JSON.parse(resData));
+                    try {
+                        resolve(JSON.parse(resData));
+                    } catch (e) {
+                        reject(new Error(`Failed to parse JSON: ${e.message}. Raw data: ${resData}`));
+                    }
                 } else {
                     reject(new Error(`Status ${res.statusCode}: ${resData}`));
                 }

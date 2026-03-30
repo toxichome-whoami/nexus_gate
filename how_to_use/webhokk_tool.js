@@ -49,13 +49,13 @@ async function callGateway(path, body = null, method = 'POST') {
         headers: {
             'Authorization': authHeader,
             'Content-Type': 'application/json',
-            'X-NexusGate-Webhook-Token': CONFIG.webhookSecret,
+            'X-NexusGate-Webhook-Token': Buffer.from(CONFIG.webhookSecret).toString('base64'),
             ...(body ? { 'Content-Length': Buffer.byteLength(postData) } : {})
         }
     };
 
     return new Promise((resolve, reject) => {
-        const parsedUrl = new URL(CONFIG.url);
+        const parsedUrl = new URL(CONFIG.baseUrl);
         const lib = parsedUrl.protocol === 'https:' ? https : http;
         const req = lib.request(url, options, (res) => {
             let data = '';

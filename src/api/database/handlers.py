@@ -1,5 +1,9 @@
 import json
+import httpx
+import base64
+import asyncio
 from fastapi import APIRouter, Depends, Request, Query, Path
+from api.federation.sync import FederationState
 from pydantic import ValidationError
 
 from config.loader import ConfigManager
@@ -14,6 +18,16 @@ from db.dialect.transpiler import transpile_sql
 from api.database.filter_builder import build_where_clause
 
 from .router import router
+from api.federation.proxy import proxy_request
+
+def _is_federated(alias: str) -> bool:
+    config = ConfigManager.get()
+    if not config.features.federation or not config.federation.enabled:
+        return False
+    for srv_alias in config.federation.server.keys():
+        if alias.startswith(f"{srv_alias}_"):
+            return True
+    return False
 
 async def get_db_engine(db_name: str, auth: AuthContext):
     # Check scope
@@ -46,8 +60,60 @@ async def list_databases(request: Request, auth: AuthContext = Depends(get_auth_
                 "engine": db_cfg.engine.value,
                 "mode": db_cfg.mode.value,
                 "status": status,
-                "tables_count": len(await engine.list_tables()) if status == "connected" else 0
+                "tables_count": len(await engine.list_tables()) if status == "connected" else 0,
+                "federated": False,
             })
+
+    # Append federated databases from synced remote servers
+    if config.features.federation and config.federation.enabled:
+        state = FederationState()
+        
+        async def fetch_remote_dbs(alias, srv_state):
+            if srv_state.get("status") != "up" or alias not in config.federation.server:
+                return
+                
+            srv_config = config.federation.server[alias]
+            databases = srv_state.get("databases", {})
+            
+            try:
+                url = srv_config.url.rstrip("/")
+                encoded_secret = base64.b64encode(srv_config.secret.encode("utf-8")).decode("utf-8")
+                headers = {"X-Federation-Secret": encoded_secret, "X-Federation-Node": srv_config.node_id}
+                
+                async with httpx.AsyncClient(verify=srv_config.trust_mode == "verify", timeout=5) as client:
+                    resp = await client.get(f"{url}/api/db/databases", headers=headers)
+                    if resp.status_code == 200:
+                        remote_dbs = resp.json().get("data", {}).get("databases", [])
+                        new_databases = {}
+                        for db in remote_dbs:
+                            if db.get("federated"): continue
+                            db_name = db.get("name")
+                            new_databases[db_name] = {
+                                "status": databases.get(db_name, "up"),
+                                "engine": db.get("engine", "unknown"),
+                                "mode": db.get("mode", "unknown"),
+                                "tables_count": db.get("tables_count", 0)
+                            }
+                        databases = new_databases
+            except Exception:
+                pass
+                
+            for db_name, db_info in databases.items():
+                fed_name = f"{alias}_{db_name}"
+                if "*" in auth.db_scope or fed_name in auth.db_scope:
+                    dbs.append({
+                        "name": fed_name,
+                        "engine": db_info.get("engine", "unknown") if isinstance(db_info, dict) else "unknown",
+                        "mode": db_info.get("mode", "unknown") if isinstance(db_info, dict) else "unknown",
+                        "status": db_info.get("status", "unknown") if isinstance(db_info, dict) else db_info,
+                        "tables_count": db_info.get("tables_count", 0) if isinstance(db_info, dict) else 0,
+                        "federated": True,
+                        "remote_server": alias,
+                    })
+                    
+        tasks = [fetch_remote_dbs(alias, srv_state) for alias, srv_state in state.servers.items()]
+        if tasks:
+            await asyncio.gather(*tasks)
 
     return success_response(request, {"databases": dbs})
 
@@ -57,6 +123,9 @@ async def list_tables(
     db_name: str = Path(...),
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(db_name):
+        return await proxy_request(db_name, "tables", request, True)
+
     if auth.mode == ServerMode.WRITEONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Write-only keys cannot list tables", 403)
 
@@ -84,6 +153,9 @@ async def execute_query(
     db_name: str = Path(...),
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(db_name):
+        return await proxy_request(db_name, "query", request, True)
+
     engine, db_cfg = await get_db_engine(db_name, auth)
 
     # Parse and validate AST
@@ -121,6 +193,9 @@ async def get_rows(
     params: FetchRowsParams = Depends(),
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(db_name):
+        return await proxy_request(db_name, f"{table_name}/rows", request, True)
+
     if auth.mode == ServerMode.WRITEONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Write-only keys cannot read rows", 403)
 
@@ -167,6 +242,9 @@ async def insert_rows(
     table_name: str = Path(...),
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(db_name):
+        return await proxy_request(db_name, f"{table_name}/rows", request, True)
+
     if auth.mode == ServerMode.READONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Read-only keys cannot insert rows", 403)
 
@@ -209,6 +287,9 @@ async def update_rows(
     table_name: str = Path(...),
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(db_name):
+        return await proxy_request(db_name, f"{table_name}/rows", request, True)
+
     if auth.mode == ServerMode.READONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Read-only keys cannot update rows", 403)
 
@@ -243,6 +324,9 @@ async def delete_rows(
     table_name: str = Path(...),
     auth: AuthContext = Depends(get_auth_context)
 ):
+    if _is_federated(db_name):
+        return await proxy_request(db_name, f"{table_name}/rows", request, True)
+
     if auth.mode == ServerMode.READONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Read-only keys cannot delete rows", 403)
 

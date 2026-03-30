@@ -16,7 +16,9 @@ def main():
         port=config.server.port,
         factory=True,
         log_level=config.logging.level.lower(),
-        timeout_keep_alive=config.server.request_timeout
+        timeout_keep_alive=config.server.request_timeout,
+        http="httptools",
+        limit_concurrency=1000
     )
 
 if __name__ == "__main__":

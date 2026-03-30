@@ -37,13 +37,15 @@ class DbEngineType(str, Enum):
     MARIADB = "mariadb"
     DB2 = "db2"
     COCKROACHDB = "cockroachdb"
-    
+from pydantic import BaseModel, ConfigDict
+
 class FileType(str, Enum):
     FILE = "file"
     DIR = "directory"
     ALL = "all"
 
 class AuthContext(BaseModel):
+    model_config = ConfigDict(slots=True, frozen=True)
     api_key_name: str
     mode: ServerMode
     db_scope: List[str]
@@ -52,6 +54,7 @@ class AuthContext(BaseModel):
     full_admin: bool = False
 
 class RequestMeta(BaseModel):
+    model_config = ConfigDict(slots=True)
     request_id: str
     timestamp: str
     duration_ms: float
@@ -61,11 +64,13 @@ class RequestMeta(BaseModel):
     proxy_latency_ms: Optional[float] = None
 
 class ErrorDetails(BaseModel):
+    model_config = ConfigDict(slots=True)
     code: str
     message: str
     details: Optional[Any] = None
 
 class ResponseEnvelope(BaseModel):
+    model_config = ConfigDict(slots=True)
     success: bool
     data: Optional[Any] = None
     error: Optional[ErrorDetails] = None
