@@ -18,7 +18,8 @@ class PostgresEngine(DatabaseEngine):
             pool_size=config.pool_min,
             max_overflow=config.pool_max - config.pool_min if config.pool_max > config.pool_min else 0,
             pool_timeout=config.connection_timeout,
-            pool_recycle=config.max_lifetime
+            pool_recycle=config.max_lifetime,
+            pool_pre_ping=True
         )
 
     async def connect(self) -> None:
