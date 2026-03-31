@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, ORJSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -31,6 +31,7 @@ def create_app() -> FastAPI:
         docs_url="/api/docs",
         redoc_url=None,
         openapi_url="/api/spec",
+        default_response_class=ORJSONResponse
     )
 
     @app.middleware("http")

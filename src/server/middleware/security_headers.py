@@ -1,10 +1,9 @@
-from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 import orjson
 
 class SecurityHeadersMiddleware:
     """ASGIMiddleware to add security headers to every response."""
+    __slots__ = ("app",)
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
