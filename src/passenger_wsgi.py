@@ -6,12 +6,20 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-def load_source(modname, filename):
-    loader = importlib.machinery.SourceFileLoader(modname, filename)
-    spec = importlib.util.spec_from_file_location(modname, filename, loader=loader)
-    module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
-    return module
+import os
+import sys
 
-wsgi = load_source('wsgi', 'passenger_wsgi.py')
-application = wsgi.application
+# Ensure app directory is in path
+sys.path.insert(0, os.path.dirname(__file__))
+
+# Convert the ASGI application to WSGI for cPanel Phusion Passenger
+try:
+    from a2wsgi import ASGIMiddleware
+    from server.app import create_app
+    
+    # Build the FastAPI app
+    fastapi_app = create_app()
+    # Expose 'application' as WSGI object expected by Passenger
+    application = ASGIMiddleware(fastapi_app)
+except ImportError:
+    raise RuntimeError("a2wsgi is required to run on cPanel/Passenger. Please install a2wsgi via pip install a2wsgi")

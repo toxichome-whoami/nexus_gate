@@ -77,3 +77,43 @@ class MemoryCache:
             "hits": getattr(cache, "hits", 0),
             "misses": getattr(cache, "misses", 0)
         }
+
+    @classmethod
+    async def check_rate_limit(cls, limits_key: str, window: int, limit: int, penalty_key: str, burst: int, penalty_cooldown: int) -> tuple[bool, int]:
+        """
+        In-memory sliding window rate limit.
+        Since it's in a single process, the internal lock is sufficient.
+        """
+        now = time.time()
+        window_start = now - window
+        cache = cls.get_cache()
+        
+        async with cls._lock:
+            # 1. Check penalty
+            if penalty_key in cache:
+                return True, limit + 1
+            
+            # 2. Manage history
+            history = cache.get(limits_key, [])
+            history = [ts for ts in history if ts > window_start]
+            
+            if len(history) >= limit + burst:
+                # Violation!
+                v_key = f"rl:violations:{limits_key}"
+                violations = cache.get(v_key, 0) + 1
+                cache[v_key] = violations
+                # Note: per-item TTL isn't fully supported in cachetools.TTLCache 
+                # but it uses default_ttl. Good enough for memory-only mode.
+                
+                if violations >= 10:
+                    cache[penalty_key] = True
+                    logger.warning("Applied IP penalty in memory", key=penalty_key)
+                
+                return True, len(history)
+            
+            # 3. Success
+            history.append(now)
+            cache[limits_key] = history
+            return False, len(history)
+
+import time

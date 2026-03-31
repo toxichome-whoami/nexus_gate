@@ -14,11 +14,12 @@ def main():
         "server.app:create_app",
         host=config.server.host,
         port=config.server.port,
+        workers=config.server.workers if config.server.workers > 0 else 1,
         factory=True,
         log_level=config.logging.level.lower(),
         timeout_keep_alive=config.server.request_timeout,
         http="httptools",
-        limit_concurrency=1000
+        limit_concurrency=config.server.max_connections
     )
 
 if __name__ == "__main__":
