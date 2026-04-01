@@ -40,7 +40,10 @@ All three paths use Base64 encoding for transport, but the raw secrets are store
 | **Timing Attacks** | All secret comparisons (API keys, federation secrets, webhook tokens) use `hmac.compare_digest` (constant-time). |
 | **MIME Sniffing** | All responses include `X-Content-Type-Options: nosniff`. |
 | **XSS** | Strict `application/json` content-type enforcement and WAF-based input sanitization. |
-| **Clickjacking** | `X-Frame-Options: DENY` is added to all responses by the `SecurityHeadersMiddleware`. |
+| **Clickjacking** | `X-Frame-Options: DENY` is added to all responses by the unified `SecurityHeadersMiddleware` (pure ASGI). |
+
+> [!NOTE]
+> The `info` and `exists` storage actions are available to read-only API keys. All other mutating storage and database actions enforce `readwrite` or `writeonly` mode.
 
 ## 5. Web Application Firewall (WAF)
 

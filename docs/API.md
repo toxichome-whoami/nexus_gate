@@ -190,7 +190,14 @@ curl -X POST "http://localhost:4500/api/fs/local_fs/upload" \
      -d '{"action":"finalize", "upload_id":"upl_xxx"}'
 ```
 
-### 6. File Actions (Rename, Move, Copy, Delete, Mkdir)
+### 6. File Actions
+
+All file actions are sent as `POST` requests to `/{alias}/action` with a JSON body containing the `action` field.
+
+> [!NOTE]
+> The `info` and `exists` actions are available to **read-only** API keys. All other actions require `readwrite` or `writeonly` mode.
+
+#### Rename / Move / Copy
 ```bash
 curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
      -H "Authorization: Bearer <TOKEN>" \
@@ -200,6 +207,130 @@ curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
            "source": "/old.txt",
            "target": "/new.txt"
          }'
+```
+
+| Action | Description |
+|--------|-------------|
+| `rename` | Rename a file or directory |
+| `move` | Move a file or directory (alias for rename) |
+| `copy` | Copy a file or directory to a new location |
+
+#### Delete
+```bash
+curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{"action": "delete", "source": "/unwanted.txt"}'
+```
+
+#### Create Directory
+```bash
+curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{"action": "mkdir", "source": "/new_folder"}'
+```
+
+#### File Info
+Returns detailed metadata: name, type, size, human-readable size, MIME type, timestamps, and item count for directories.
+```bash
+curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{"action": "info", "source": "/reports/Q1.pdf"}'
+```
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "action": "info",
+    "source": "/reports/Q1.pdf",
+    "info": {
+      "name": "Q1.pdf",
+      "type": "file",
+      "size": 2457600,
+      "size_human": "2.34 MB",
+      "mime_type": "application/pdf",
+      "modified": "2026-03-15T10:30:00",
+      "created": "2026-03-01T08:00:00"
+    }
+  }
+}
+```
+
+#### Check Existence
+Lightweight boolean check — does not transfer file data.
+```bash
+curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{"action": "exists", "source": "/config/app.yml"}'
+```
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "action": "exists",
+    "source": "/config/app.yml",
+    "exists": true
+  }
+}
+```
+
+#### Bulk Delete
+Delete multiple files/directories in a single request. Each item reports its own success/failure status.
+```bash
+curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "action": "bulk_delete",
+           "sources": ["/tmp/old1.log", "/tmp/old2.log", "/tmp/cache"]
+         }'
+```
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "action": "bulk_delete",
+    "results": [
+      {"source": "/tmp/old1.log", "status": "success"},
+      {"source": "/tmp/old2.log", "status": "success"},
+      {"source": "/tmp/cache", "status": "success"}
+    ]
+  }
+}
+```
+
+#### Bulk Move
+Move multiple files/directories in a single request. Provide an `operations` array of `{source, target}` pairs.
+```bash
+curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "action": "bulk_move",
+           "operations": [
+             {"source": "/inbox/file1.txt", "target": "/archive/file1.txt"},
+             {"source": "/inbox/file2.txt", "target": "/archive/file2.txt"}
+           ]
+         }'
+```
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "action": "bulk_move",
+    "results": [
+      {"source": "/inbox/file1.txt", "target": "/archive/file1.txt", "status": "success"},
+      {"source": "/inbox/file2.txt", "target": "/archive/file2.txt", "status": "success"}
+    ]
+  }
+}
 ```
 
 ---
