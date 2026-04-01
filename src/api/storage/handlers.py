@@ -432,10 +432,49 @@ async def execute_action(
     if _is_federated(alias):
         return await proxy_request(alias, f"action", request, False)
 
-    if auth.mode == ServerMode.READONLY:
-        raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Read-only keys cannot execute storage actions", 403)
+    if auth.mode == ServerMode.READONLY and body.action not in ("info", "exists"):
+        raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Read-only keys cannot execute modifying storage actions", 403)
 
-    if body.action == "delete":
+    if body.action == "info":
+        target = _get_storage_path(alias, body.source, auth)
+        info = await get_file_info(target)
+        return success_response(request, {"action": "info", "source": body.source, "info": info})
+
+    elif body.action == "exists":
+        target = _get_storage_path(alias, body.source, auth)
+        exists = os.path.exists(target)
+        return success_response(request, {"action": "exists", "source": body.source, "exists": exists})
+        
+    elif body.action == "bulk_delete":
+        if not body.sources:
+            raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "Missing 'sources' list", 400)
+        from .file_ops import bulk_delete_paths
+        targets = [_get_storage_path(alias, s, auth) for s in body.sources]
+        results = await bulk_delete_paths(targets)
+        for i, res in enumerate(results):
+            res["source"] = body.sources[i]
+        return success_response(request, {"action": "bulk_delete", "results": results})
+        
+    elif body.action == "bulk_move":
+        if not body.operations:
+            raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "Missing 'operations' list", 400)
+        from .file_ops import bulk_move_paths
+        real_ops = []
+        for op in body.operations:
+            if not op.get("source") or not op.get("target"): continue
+            real_ops.append({
+                "source": _get_storage_path(alias, op.get("source"), auth),
+                "target": _get_storage_path(alias, op.get("target"), auth)
+            })
+        results = await bulk_move_paths(real_ops)
+        for i, res in enumerate(results):
+            if i < len(body.operations):
+                res["source"] = body.operations[i].get("source")
+                if "target" in res:
+                    res["target"] = body.operations[i].get("target")
+        return success_response(request, {"action": "bulk_move", "results": results})
+        
+    elif body.action == "delete":
         target = _get_storage_path(alias, body.source, auth)
         await delete_path(target)
         return success_response(request, {"action": "delete", "source": body.source, "status": "success"})
