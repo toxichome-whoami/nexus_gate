@@ -4,7 +4,7 @@ import hashlib
 from typing import Dict, Any, Optional
 
 from api.errors import NexusGateException, ErrorCodes
-from cache.__init__ import CacheManager
+from cache import CacheManager
 
 class ChunkedUploadManager:
     """Manages multi-part chunked file uploads."""

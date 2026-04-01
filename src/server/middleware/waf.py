@@ -1,5 +1,5 @@
 from starlette.types import ASGIApp, Scope, Receive, Send, Message
-from fastapi.responses import ORJSONResponse
+import orjson
 import re
 from urllib.parse import unquote
 
@@ -61,14 +61,23 @@ class WAFMiddleware:
         return await self.app(scope, receive, send)
 
     async def _send_error(self, send: Send, status_code: int, code: str, message: str) -> None:
-        response = ORJSONResponse(
-            status_code=status_code,
-            content={
-                "success": False,
-                "error": {
-                    "code": code,
-                    "message": message
-                }
+        body = orjson.dumps({
+            "success": False,
+            "error": {
+                "code": code,
+                "message": message
             }
-        )
-        await response(scope={}, receive=None, send=send)
+        })
+        await send({
+            "type": "http.response.start",
+            "status": status_code,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode("ascii")),
+            ],
+        })
+        await send({
+            "type": "http.response.body",
+            "body": body,
+            "more_body": False
+        })

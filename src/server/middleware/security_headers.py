@@ -1,5 +1,4 @@
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
-import orjson
 
 class SecurityHeadersMiddleware:
     """ASGIMiddleware to add security headers to every response."""
@@ -29,8 +28,15 @@ class SecurityHeadersMiddleware:
 
                 # Add strict CSP only for non-documentation endpoints
                 path = scope.get("path", "")
-                if not (path.startswith("/api/docs") or path.startswith("/api/spec")):
-                    security_headers.append((b"content-security-policy", b"default-src 'none'"))
+                if path.startswith("/api/docs") or path.startswith("/api/spec") or path.startswith("/docs") or path.startswith("/redoc"):
+                    pass # Allow defaults
+                else:
+                    security_headers.append((b"content-security-policy", b"default-src 'none'; frame-ancestors 'none'"))
+
+                # Disable caching dynamically for /api endpoints to prevent caching sensitive metadata/secrets
+                if path.startswith("/api/"):
+                    security_headers.append((b"cache-control", b"no-store, no-cache, must-revalidate, max-age=0"))
+                    security_headers.append((b"pragma", b"no-cache"))
 
                 # Append security headers if they don't already exist
                 existing_keys = {k.lower() for k, v in headers}

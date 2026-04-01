@@ -9,7 +9,6 @@ Architecture:
   - CDN Headers: immutable cache directives for static assets.
 """
 import os
-import stat
 import hashlib
 import mimetypes
 import aiofiles

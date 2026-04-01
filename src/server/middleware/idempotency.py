@@ -7,7 +7,7 @@ import orjson
 import structlog
 from starlette.types import ASGIApp, Scope, Receive, Send, Message
 
-from cache.__init__ import CacheManager
+from cache import CacheManager
 
 logger = structlog.get_logger()
 

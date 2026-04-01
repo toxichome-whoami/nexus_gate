@@ -1,3 +1,4 @@
+import time
 import asyncio
 from typing import Any, Optional
 import structlog
@@ -116,4 +117,3 @@ class MemoryCache:
             cache[limits_key] = history
             return False, len(history)
 
-import time

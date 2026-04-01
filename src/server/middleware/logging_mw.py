@@ -1,7 +1,5 @@
 import time
 import structlog
-from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
 logger = structlog.get_logger()

@@ -7,7 +7,7 @@ import aiofiles
 import structlog
 from fastapi import APIRouter, Depends, Request, Query, Path
 from api.federation.sync import FederationState
-from typing import Optional, List
+from typing import Optional
 
 from config.loader import ConfigManager
 from utils.types import AuthContext, ServerMode
@@ -17,13 +17,17 @@ from api.responses import success_response
 from api.errors import NexusGateException, ErrorCodes
 
 from .router import router
-from .schemas import StorageItem, ActionRequest
+from .schemas import ActionRequest
 from .file_ops import get_file_info, rename_path, copy_path, delete_path, mkdir
 from .streaming import serve_file
 from .archive import stream_zip_folder
 from .image_processor import process_image_and_stream
 from .upload_scanner import UploadScanner, ScannerRejectError
 from api.federation.proxy import proxy_request
+
+from webhook.emitter import emit_event, WebhookTrigger
+from api.storage.chunked_upload import ChunkedUploadManager
+from utils.uuid7 import uuid7
 
 logger = structlog.get_logger()
 
@@ -297,7 +301,7 @@ async def upload_file(
                             413,
                         )
 
-            from webhook.emitter import emit_event, WebhookTrigger
+
             emit_event("fs", "write", alias, path, "UPLOAD_DIRECT", {"size": total_written, "sha256": sha256.hexdigest()},
                 WebhookTrigger(
                     api_key=auth.api_key_name,
@@ -322,7 +326,7 @@ async def upload_file(
             file = form.get("file")
             contents = await file.read()
 
-            from api.storage.chunked_upload import ChunkedUploadManager
+
             await ChunkedUploadManager.write_chunk(upload_id, chunk_index, chunk_hash, contents)
             session = await ChunkedUploadManager.get_session(upload_id)
             return success_response(request, {
@@ -342,7 +346,7 @@ async def upload_file(
     else:
         body = await request.json()
         action = body.get("action")
-        from api.storage.chunked_upload import ChunkedUploadManager
+
 
         if action == "initiate":
             filename = body.get("filename", "")
@@ -352,7 +356,7 @@ async def upload_file(
             except ScannerRejectError as e:
                 raise NexusGateException(e.code, e.message, 400)
 
-            from utils.uuid7 import uuid7
+
             upload_id = f"upl_{uuid7().hex}"
             chunk_size_bytes = 10485760 # default 10mb fallback
             try:
@@ -394,7 +398,7 @@ async def upload_file(
             target = _get_storage_path(alias, session["path"], auth)
             result = await ChunkedUploadManager.finalize(upload_id, target)
 
-            from webhook.emitter import emit_event, WebhookTrigger
+
             emit_event("fs", "write", alias, session["path"], "UPLOAD_CHUNKED", result,
                 WebhookTrigger(
                     api_key=auth.api_key_name,

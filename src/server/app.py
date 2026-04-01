@@ -3,10 +3,8 @@ from fastapi.responses import JSONResponse, ORJSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from __init__ import __version__
 from config.loader import ConfigManager
 from server.lifespan import lifespan
-from server.middleware.security import SecurityMiddleware
 from server.middleware.security_headers import SecurityHeadersMiddleware
 from server.middleware.request_id import RequestIDMiddleware
 from server.middleware.waf import WAFMiddleware
@@ -26,7 +24,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="NexusGate",
         description="High-Performance Unified API Gateway with Dynamic Federation, Webhooks & Storage Management",
-        version=__version__,
+        version="1.0.0",
         lifespan=lifespan,
         docs_url="/api/docs",
         redoc_url=None,
@@ -57,7 +55,6 @@ def create_app() -> FastAPI:
     # Outermost (runs first): Logging
     app.add_middleware(LoggingMiddleware)
     app.add_middleware(RateLimitMiddleware)
-    app.add_middleware(SecurityMiddleware)
     app.add_middleware(IdempotencyMiddleware)
     app.add_middleware(WAFMiddleware)
     setup_cors(app)

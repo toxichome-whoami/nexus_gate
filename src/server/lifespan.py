@@ -7,7 +7,7 @@ from webhook.dispatcher import dispatcher_worker
 from logger.rotator import log_rotator_worker
 from api.federation.sync import sync_federated_servers
 from db.pool import DatabasePoolManager
-from cache.__init__ import CacheManager
+from cache import CacheManager
 from security.storage import SecurityStorage
 
 logger = structlog.get_logger()

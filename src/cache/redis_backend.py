@@ -1,3 +1,4 @@
+import time
 import structlog
 import asyncio
 from typing import Any, Optional
@@ -147,4 +148,3 @@ class RedisCache:
         except Exception as e:
             logger.error("Redis rate limit LUA execution failed", error=str(e))
             return False, 0
-import time
