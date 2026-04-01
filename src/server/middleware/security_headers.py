@@ -11,17 +11,6 @@ class SecurityHeadersMiddleware:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
-            
-        # Fast memory bomb abort (bypass for storage uploads)
-        path = scope.get("path", "")
-        is_upload = path.startswith("/api/fs/")
-        headers_dict = dict(scope.get("headers", []))
-        cl_bytes = headers_dict.get(b"content-length")
-        if cl_bytes and int(cl_bytes) > 5242880 and not is_upload:  # 5MB Limit
-            payload = orjson.dumps({"success": False, "error": {"code": "PAYLOAD_TOO_LARGE", "message": "Max 5MB payload limit exceeded."}})
-            await send({"type": "http.response.start", "status": 413, "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(payload)).encode("utf-8"))]})
-            await send({"type": "http.response.body", "body": payload})
-            return
 
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
