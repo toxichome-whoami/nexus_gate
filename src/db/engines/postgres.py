@@ -1,7 +1,6 @@
 from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
 from sqlalchemy import text
-
 from db.engines.base import DatabaseEngine, TableInfo, ColumnInfo, QueryResult
 from config.schema import DatabaseDefConfig
 
@@ -12,9 +11,12 @@ class PostgresEngine(DatabaseEngine):
             uri = uri.replace("postgres://", "postgresql+asyncpg://")
         elif uri.startswith("postgresql://"):
             uri = uri.replace("postgresql://", "postgresql+asyncpg://")
-
+        connect_args = {}
+        if "ssl=true" in uri or "sslmode=require" in uri:
+            connect_args["ssl"] = True
         self.engine: AsyncEngine = create_async_engine(
             uri,
+            connect_args=connect_args,
             pool_size=config.pool_min,
             max_overflow=config.pool_max - config.pool_min if config.pool_max > config.pool_min else 0,
             pool_timeout=config.connection_timeout,

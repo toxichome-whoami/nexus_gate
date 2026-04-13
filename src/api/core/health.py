@@ -2,12 +2,14 @@ import time
 import os
 from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 import psutil
 
-from __init__ import __version__
 from config.loader import ConfigManager
 from api.responses import success_response
+from db.pool import DatabasePoolManager
+from cache import CacheManager
+from cache.memory import MemoryCache
+from cache.redis_backend import RedisCache
 
 router = APIRouter()
 uptime_start = time.time()
@@ -20,7 +22,7 @@ async def root(request: Request):
     data = {
         "status": "online",
         "name": "NexusGate",
-        "version": __version__,
+        "version": "1.0.0",
         "uptime_seconds": int(time.time() - uptime_start),
         "features": config.features.model_dump()
     }
@@ -38,7 +40,6 @@ async def health(request: Request):
     config = ConfigManager.get()
 
     # Ping DB Pools
-    from db.pool import DatabasePoolManager
     db_status = {}
     all_dbs_up = True
     for alias in config.database:
@@ -48,10 +49,6 @@ async def health(request: Request):
         if not is_up: all_dbs_up = False
 
     # Ping Caches
-    from cache.__init__ import CacheManager
-    from cache.memory import MemoryCache
-    from cache.redis_backend import RedisCache
-
     cache_status = {"enabled": config.cache.enabled}
     if config.cache.enabled:
         cache_status["backend"] = config.cache.backend

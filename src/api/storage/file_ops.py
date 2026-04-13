@@ -1,9 +1,10 @@
 import os
 import shutil
-import hashlib
-from typing import Optional, Dict, Any, List
+from typing import Dict, Any, List
 from datetime import datetime
 import asyncio
+import mimetypes
+from utils.size_parser import format_size
 from api.errors import NexusGateException, ErrorCodes
 
 async def get_file_info(path: str) -> Dict[str, Any]:
@@ -13,13 +14,25 @@ async def get_file_info(path: str) -> Dict[str, Any]:
     stat = os.stat(path)
     is_dir = os.path.isdir(path)
     
-    return {
+    res = {
         "name": os.path.basename(path),
         "type": "directory" if is_dir else "file",
         "size": stat.st_size if not is_dir else None,
         "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
         "created": datetime.fromtimestamp(stat.st_ctime).isoformat()
     }
+    
+    if not is_dir:
+        res["size_human"] = format_size(stat.st_size)
+        mime, _ = mimetypes.guess_type(path)
+        res["mime_type"] = mime or "application/octet-stream"
+    else:
+        try:
+            res["items_count"] = len(os.listdir(path))
+        except Exception:
+            res["items_count"] = 0
+            
+    return res
 
 async def rename_path(source: str, target: str) -> None:
     try:
@@ -55,3 +68,29 @@ async def mkdir(path: str) -> None:
         os.makedirs(path, exist_ok=True)
     except Exception as e:
         raise NexusGateException(ErrorCodes.SERVER_INTERNAL, f"Failed to create directory: {str(e)}", 500)
+
+async def bulk_delete_paths(sources: List[str]) -> List[Dict[str, Any]]:
+    results = []
+    for source in sources:
+        try:
+            await delete_path(source)
+            results.append({"source": source, "status": "success"})
+        except Exception as e:
+            results.append({"source": source, "status": "error", "message": str(e)})
+    return results
+
+async def bulk_move_paths(operations: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    results = []
+    for op in operations:
+        source = op.get("source")
+        target = op.get("target")
+        if not source or not target:
+            results.append({"source": source, "status": "error", "message": "Missing source or target"})
+            continue
+            
+        try:
+            await rename_path(source, target)
+            results.append({"source": source, "target": target, "status": "success"})
+        except Exception as e:
+            results.append({"source": source, "target": target, "status": "error", "message": str(e)})
+    return results

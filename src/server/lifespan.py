@@ -7,7 +7,7 @@ from webhook.dispatcher import dispatcher_worker
 from logger.rotator import log_rotator_worker
 from api.federation.sync import sync_federated_servers
 from db.pool import DatabasePoolManager
-from cache.__init__ import CacheManager
+from cache import CacheManager
 from security.storage import SecurityStorage
 
 logger = structlog.get_logger()
@@ -23,6 +23,11 @@ async def lifespan(app: FastAPI):
     
     # 1.5 Init Security Database (Bans, Keys, etc.)
     await SecurityStorage.init_db()
+
+    # 1.6 Init Cache Database (if using SQLite backend)
+    if config.rate_limit.backend == "sqlite" or config.cache.backend == "sqlite":
+        from cache.sqlite_backend import SQLiteCache
+        await SQLiteCache.init_db()
     
     # 2. Init DB Pools (done lazily on first request via DatabasePoolManager, but we can log)
     logger.info("Database pools initialized (lazy connecting on demand)")

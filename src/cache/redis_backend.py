@@ -1,3 +1,4 @@
+import time
 import structlog
 import asyncio
 from typing import Any, Optional
@@ -75,3 +76,75 @@ class RedisCache:
         if cls._client:
             await cls._client.close()
             cls._client = None
+
+    @classmethod
+    async def check_rate_limit(cls, limits_key: str, window: int, limit: int, penalty_key: str, burst: int, penalty_cooldown: int) -> tuple[bool, int]:
+        """
+        Atomic sliding window rate limit check using a Redis Lua script.
+        Returns (is_violated, current_count).
+        """
+        client = await cls.get_client()
+        
+        # Lua script for sliding window rate limiting.
+        # ARGV[1]: window_start (now - window)
+        # ARGV[2]: now
+        # ARGV[3]: limit + burst
+        # ARGV[4]: window (expiration for the sorted set)
+        lua_script = """
+        local key = KEYS[1]
+        local window_start = tonumber(ARGV[1])
+        local now = tonumber(ARGV[2])
+        local limit_with_burst = tonumber(ARGV[3])
+        local window = tonumber(ARGV[4])
+
+        -- Remove timestamps outside the current window
+        redis.call('ZREMRANGEBYSCORE', key, '-inf', window_start)
+        
+        -- Count remaining timestamps
+        local current_count = redis.call('ZCARD', key)
+
+        if current_count >= limit_with_burst then
+            return {1, current_count}
+        end
+
+        -- Add current timestamp
+        redis.call('ZADD', key, now, now)
+        -- Set expiration for the set
+        redis.call('EXPIRE', key, window)
+        
+        return {0, current_count + 1}
+        """
+        
+        now = time.time()
+        window_start = now - window
+        
+        # 1. Check if IP is already penalized
+        is_penalized = await client.get(penalty_key)
+        if is_penalized:
+            return True, limit + 1
+            
+        # 2. Run Lua script for atomic sliding window
+        try:
+            violated, count = await client.eval(lua_script, 1, limits_key, window_start, now, limit + burst, window)
+            
+            if violated == 1:
+                # Handle violation tracking and potential penalty
+                violation_key = f"rl:violations:{limits_key.split(':')[-1]}" # Assuming format rl:ip:X...
+                # We can't easily parse the key here without assumptions, so we'll use the whole limits_key for violation tracking if needed, 
+                # but better to pass the identifier explicitly if we want clean keys.
+                # For now, let's just use a simple approach.
+                
+                # Increment violation counter
+                violations = await client.incr(violation_key)
+                await client.expire(violation_key, window * 2)
+                
+                if violations >= 10:
+                    await client.setex(penalty_key, penalty_cooldown, "1")
+                    logger.warning("Applied IP penalty in Redis", key=penalty_key)
+                
+                return True, count
+            
+            return False, count
+        except Exception as e:
+            logger.error("Redis rate limit LUA execution failed", error=str(e))
+            return False, 0

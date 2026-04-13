@@ -37,7 +37,7 @@ class LoggingConfig(BaseModel):
 
 class RateLimitConfig(BaseModel):
     enabled: bool = True
-    backend: Literal["memory", "redis"] = "memory"
+    backend: Literal["memory", "redis", "sqlite"] = "memory"
     redis_url: str = ""
     window: int = 60
     max_requests: int = 100
@@ -46,7 +46,7 @@ class RateLimitConfig(BaseModel):
 
 class CacheConfig(BaseModel):
     enabled: bool = True
-    backend: Literal["memory", "redis"] = "memory"
+    backend: Literal["memory", "redis", "sqlite"] = "memory"
     redis_url: str = ""
     max_memory: str = "100mb"
     default_ttl: int = 60

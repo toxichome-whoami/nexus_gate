@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, Request
-import json
 
 from config.loader import ConfigManager
 from utils.types import AuthContext

@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # The Redis store handles distributed state for Rate Limiting and Caching.
+  redis:
+    image: redis:7-alpine
+    container_name: nexusgate_redis
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # NexusGate scalable replicas
+  nexusgate:
+    build: .
+    image: nexusgate:latest
+    # Override command to run multiple Uvicorn workers (via Config) or let Uvicorn handle it 
+    # Since we configured src/main.py to read config.server.workers, we just need to set the config!
+    restart: unless-stopped
+    volumes:
+      - ./config.toml:/config.toml
+      - ./storage:/storage
+      - ./logs:/logs
+      - ./data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      replicas: 3 # <--- AUTO-SCALING / LOAD BALANCING REPLICAS
+      update_config:
+        parallelism: 1
+        delay: 10s
+    # In production, do not expose ports directly to host. Let NGINX route traffic.
+    expose:
+      - "4500"
+
+  # NGINX Load Balancer
+  nginx:
+    image: nginx:alpine
+    container_name: nexusgate_lb
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - nexusgate
+    restart: unless-stopped
+
+volumes:
+  redis_data:

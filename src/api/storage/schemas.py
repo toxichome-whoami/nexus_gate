@@ -11,7 +11,6 @@ class StorageItem(BaseModel):
     modified: Optional[str] = None
     created: Optional[str] = None
     checksum_sha256: Optional[str] = None
-    download_url: Optional[str] = None
     items_count: Optional[int] = None
 
 class UploadInitRequest(BaseModel):
@@ -24,7 +23,7 @@ class UploadInitRequest(BaseModel):
     chunk_size: Optional[int] = None
 
 class ActionRequest(BaseModel):
-    action: Literal["rename", "move", "copy", "delete", "mkdir", "info", "exists", "bulk_delete", "bulk_move", "archive", "extract"]
+    action: Literal["rename", "move", "copy", "delete", "mkdir", "info", "exists", "bulk_delete", "bulk_move"]
     source: Optional[str] = None
     target: Optional[str] = None
     sources: Optional[List[str]] = None

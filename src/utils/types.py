@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import TypedDict, Any, Dict, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 class HealthStatusEnum(str, Enum):
     HEALTHY = "healthy"
@@ -37,7 +37,7 @@ class DbEngineType(str, Enum):
     MARIADB = "mariadb"
     DB2 = "db2"
     COCKROACHDB = "cockroachdb"
-from pydantic import BaseModel, ConfigDict
+
 
 class FileType(str, Enum):
     FILE = "file"

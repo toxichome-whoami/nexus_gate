@@ -1,12 +1,11 @@
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, APIRouter
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+import os
 
-from __init__ import __version__
 from config.loader import ConfigManager
 from server.lifespan import lifespan
-from server.middleware.security import SecurityMiddleware
 from server.middleware.security_headers import SecurityHeadersMiddleware
 from server.middleware.request_id import RequestIDMiddleware
 from server.middleware.waf import WAFMiddleware
@@ -26,12 +25,20 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="NexusGate",
         description="High-Performance Unified API Gateway with Dynamic Federation, Webhooks & Storage Management",
-        version=__version__,
+        version="1.0.0",
         lifespan=lifespan,
         docs_url="/api/docs",
         redoc_url=None,
-        openapi_url="/api/spec",
+        openapi_url="/api/spec"
     )
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon():
+        # icon is a directory containing favicon.ico
+        icon_path = os.path.join(os.path.dirname(__file__), "..", "icon", "favicon.ico")
+        if os.path.exists(icon_path):
+            return FileResponse(icon_path)
+        return JSONResponse(status_code=404, content={"error": "Icon not found"})
 
     @app.middleware("http")
     async def dynamic_playground_middleware(request, call_next):
@@ -52,23 +59,29 @@ def create_app() -> FastAPI:
         return await call_next(request)
 
     # Middleware stack — added in reverse execution order
-    # Innermost (runs last): SecurityHeaders
-    # Outermost (runs first): Logging
     app.add_middleware(LoggingMiddleware)
     app.add_middleware(RateLimitMiddleware)
-    app.add_middleware(SecurityMiddleware)
     app.add_middleware(IdempotencyMiddleware)
     app.add_middleware(WAFMiddleware)
     setup_cors(app)
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
 
+    # --- API Versioning (v1) ---
+    api_v1 = APIRouter(prefix="/api/v1")
+
+    # Include functional routers with their specific prefixes
+    api_v1.include_router(database.router, prefix="/db")
+    api_v1.include_router(storage.router, prefix="/fs")
+    api_v1.include_router(federation.router, prefix="/fed")
+    api_v1.include_router(admin_router, prefix="/admin")
+
+    # Register the versioned API
+    app.include_router(api_v1)
+
+    # Core system routes (usually not versioned)
     app.include_router(health.router)
     app.include_router(metrics_router)
-    app.include_router(database.router)
-    app.include_router(storage.router)
-    app.include_router(federation.router)
-    app.include_router(admin_router)
 
     # Add custom exception handlers
     @app.exception_handler(StarletteHTTPException)

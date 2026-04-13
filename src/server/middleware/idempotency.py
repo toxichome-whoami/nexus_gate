@@ -3,80 +3,95 @@ Idempotency Middleware: Caches responses by X-Idempotency-Key header.
 Duplicate requests with the same key return the cached response without
 re-executing the handler. Keys expire after a configurable TTL.
 """
-import json
+import orjson
 import structlog
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.types import ASGIApp
-from fastapi import Request
-from fastapi.responses import JSONResponse, Response
+from starlette.types import ASGIApp, Scope, Receive, Send, Message
 
 from cache import CacheManager
 
 logger = structlog.get_logger()
 
-IDEMPOTENCY_HEADER = "X-Idempotency-Key"
 IDEMPOTENCY_PREFIX = "idempotency:"
 IDEMPOTENCY_TTL = 86400  # 24 hours
+IDEMPOTENT_METHODS = {b"POST", b"PUT", b"PATCH", b"DELETE"}
 
-# Only cache mutating operations
-IDEMPOTENT_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+class IdempotencyMiddleware:
+    __slots__ = ("app",)
 
-
-class IdempotencyMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp):
-        super().__init__(app)
+        self.app = app
 
-    async def dispatch(self, request: Request, call_next):
-        if request.method not in IDEMPOTENT_METHODS:
-            return await call_next(request)
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
 
-        idem_key = request.headers.get(IDEMPOTENCY_HEADER)
+        method = scope.get("method", "").encode("ascii")
+        if method not in IDEMPOTENT_METHODS:
+            return await self.app(scope, receive, send)
+
+        headers = dict(scope.get("headers", []))
+        idem_key = headers.get(b"x-idempotency-key")
+        
         if not idem_key:
-            return await call_next(request)
+            return await self.app(scope, receive, send)
 
-        cache_key = f"{IDEMPOTENCY_PREFIX}{idem_key}"
+        idem_key_str = idem_key.decode("latin-1")
+        cache_key = f"{IDEMPOTENCY_PREFIX}{idem_key_str}"
 
         # Check for cached response
         cached = await CacheManager.get(cache_key)
         if cached is not None:
-            logger.debug("Returning cached idempotent response", key=idem_key)
-            response_data = json.loads(cached)
-            return JSONResponse(
-                content=response_data["body"],
-                status_code=response_data["status_code"],
-                headers={
-                    **response_data.get("headers", {}),
-                    "X-Idempotency-Replayed": "true",
-                },
-            )
-
-        # Execute request
-        response = await call_next(request)
-
-        # Cache the response body for idempotent replay
-        if response.status_code < 500:
-            body = b""
-            async for chunk in response.body_iterator:
-                body += chunk
-
+            logger.debug("Returning cached idempotent response", key=idem_key_str)
             try:
+                # Expecting format: [status_code, headers_list, body_bytes_hex]
+                if isinstance(cached, str):
+                    cached = orjson.loads(cached)
+                
+                status_code = cached[0]
+                resp_headers = [[k.encode('latin-1'), v.encode('latin-1')] for k, v in cached[1]]
+                resp_headers.append((b"x-idempotency-replayed", b"true"))
+                body_bytes = bytes.fromhex(cached[2])
+
+                await send({"type": "http.response.start", "status": status_code, "headers": resp_headers})
+                await send({"type": "http.response.body", "body": body_bytes})
+                return
+            except Exception as e:
+                logger.warning("Failed to parse cached idempotent response", error=str(e))
+                # Fallthrough to execute request if cache is corrupted
+
+        # We will intercept the response to cache it
+        response_started = False
+        res_status = 200
+        res_headers = []
+        res_body = bytearray()
+
+        async def send_wrapper(message: Message) -> None:
+            nonlocal response_started, res_status, res_headers
+            
+            if message["type"] == "http.response.start":
+                res_status = message["status"]
+                res_headers = message.get("headers", [])
+                response_started = True
+                
+            elif message["type"] == "http.response.body":
+                if res_status < 500:
+                    res_body.extend(message.get("body", b""))
+                    
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+        # Cache if successful
+        if response_started and res_status < 500 and len(res_body) > 0:
+            try:
+                # Serialize compactly as array: [status, [[k, v]], hex_body]
+                serializable_headers = [[k.decode('latin-1'), v.decode('latin-1')] for k, v in res_headers if k != b'x-idempotency-replayed']
+                payload = [res_status, serializable_headers, res_body.hex()]
+                
                 await CacheManager.set(
                     cache_key,
-                    json.dumps({
-                        "status_code": response.status_code,
-                        "body": json.loads(body.decode("utf-8")),
-                        "headers": dict(response.headers),
-                    }),
+                    orjson.dumps(payload),
                     ttl=IDEMPOTENCY_TTL,
                 )
             except Exception as e:
                 logger.warning("Failed to cache idempotent response", error=str(e))
-
-            return Response(
-                content=body,
-                status_code=response.status_code,
-                headers=dict(response.headers),
-                media_type=response.media_type,
-            )
-
-        return response

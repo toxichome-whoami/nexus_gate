@@ -56,10 +56,8 @@ def _format_metric(name: str, value, labels: dict = None, help_text: str = "", m
         lines.append(f"{name} {value}")
     return "\n".join(lines)
 
-@router.get("/metrics", response_class=PlainTextResponse, include_in_schema=False)
-async def metrics_endpoint(request: Request):
-    config = ConfigManager.get()
-
+@router.get("/metrics", include_in_schema=False)
+async def metrics_endpoint(request: Request, format: str = "prometheus"):
     proc = psutil.Process(os.getpid())
     mem_mb = proc.memory_info().rss / 1024 / 1024
     cpu_pct = proc.cpu_percent()
@@ -69,70 +67,53 @@ async def metrics_endpoint(request: Request):
     avg_duration = sum(durations) / len(durations) if durations else 0
     p99 = sorted(durations)[int(len(durations) * 0.99)] if len(durations) > 100 else avg_duration
 
-    lines = [
-        "# NexusGate Metrics (OpenMetrics format)",
-        "",
-        _format_metric(
-            "nexusgate_uptime_seconds", round(uptime, 2),
-            help_text="Server uptime in seconds", metric_type="gauge"
-        ),
-        _format_metric(
-            "nexusgate_memory_mb", round(mem_mb, 2),
-            help_text="Process memory usage in MB", metric_type="gauge"
-        ),
-        _format_metric(
-            "nexusgate_cpu_percent", round(cpu_pct, 2),
-            help_text="Process CPU usage percent", metric_type="gauge"
-        ),
-        _format_metric(
-            "nexusgate_request_duration_avg_ms", round(avg_duration, 3),
-            help_text="Average request duration in milliseconds", metric_type="gauge"
-        ),
-        _format_metric(
-            "nexusgate_request_duration_p99_ms", round(p99, 3),
-            help_text="P99 request duration in milliseconds", metric_type="gauge"
-        ),
-        _format_metric(
-            "nexusgate_rate_limit_hits_total", _metrics["rate_limit_hits"],
-            help_text="Total rate limit rejections"
-        ),
-        _format_metric(
-            "nexusgate_auth_failures_total", _metrics["auth_failures"],
-            help_text="Total authentication failures"
-        ),
-        _format_metric(
-            "nexusgate_webhook_delivered_total", _metrics["webhook_delivered"],
-            help_text="Total webhooks successfully delivered"
-        ),
-        _format_metric(
-            "nexusgate_webhook_failed_total", _metrics["webhook_failed"],
-            help_text="Total webhook delivery failures"
-        ),
-        _format_metric(
-            "nexusgate_cache_hits_total", _metrics["cache_hits"],
-            help_text="Total cache hits"
-        ),
-        _format_metric(
-            "nexusgate_cache_misses_total", _metrics["cache_misses"],
-            help_text="Total cache misses"
-        ),
-        _format_metric(
-            "nexusgate_db_queries_total", _metrics["db_queries_total"],
-            help_text="Total database queries executed"
-        ),
-        _format_metric(
-            "nexusgate_db_query_errors_total", _metrics["db_query_errors"],
-            help_text="Total database query errors"
-        ),
-    ]
+    # 1. Clean JSON Format for Humans
+    if format == "json":
+        return {
+            "status": "online",
+            "uptime_seconds": round(uptime, 2),
+            "system": {
+                "memory_mb": round(mem_mb, 2),
+                "cpu_percent": round(cpu_pct, 2)
+            },
+            "performance": {
+                "avg_request_ms": round(avg_duration, 3),
+                "p99_request_ms": round(p99, 3)
+            },
+            "counters": {
+                "rate_limit_hits": _metrics["rate_limit_hits"],
+                "auth_failures": _metrics["auth_failures"],
+                "cache": {
+                    "hits": _metrics["cache_hits"],
+                    "misses": _metrics["cache_misses"]
+                },
+                "database": {
+                    "queries": _metrics["db_queries_total"],
+                    "errors": _metrics["db_query_errors"]
+                },
+                "webhooks": {
+                    "delivered": _metrics["webhook_delivered"],
+                    "failed": _metrics["webhook_failed"]
+                }
+            }
+        }
 
-    # Per-route request counts
-    lines.append("")
-    lines.append("# HELP nexusgate_http_requests_total Total HTTP requests by method, path, status")
-    lines.append("# TYPE nexusgate_http_requests_total counter")
-    for label_key, count in _metrics["requests_total"].items():
-        parts = dict(item.split("=") for item in label_key.split("|")[1].split(","))
-        label_str = ",".join(f'{k}="{v}"' for k, v in parts.items())
-        lines.append(f"nexusgate_http_requests_total{{{label_str}}} {count}")
+    # 2. Raw Prometheus Format for Machines
+    lines = [
+        "# NexusGate Metrics",
+        _format_metric("nexusgate_uptime_seconds", round(uptime, 2), help_text="Server uptime", metric_type="gauge"),
+        _format_metric("nexusgate_memory_mb", round(mem_mb, 2), help_text="Memory usage", metric_type="gauge"),
+        _format_metric("nexusgate_cpu_percent", round(cpu_pct, 2), help_text="CPU usage", metric_type="gauge"),
+        _format_metric("nexusgate_request_duration_avg_ms", round(avg_duration, 3), help_text="Avg latency", metric_type="gauge"),
+        _format_metric("nexusgate_request_duration_p99_ms", round(p99, 3), help_text="P99 latency", metric_type="gauge"),
+        _format_metric("nexusgate_rate_limit_hits_total", _metrics["rate_limit_hits"]),
+        _format_metric("nexusgate_auth_failures_total", _metrics["auth_failures"]),
+        _format_metric("nexusgate_webhook_delivered_total", _metrics["webhook_delivered"]),
+        _format_metric("nexusgate_webhook_failed_total", _metrics["webhook_failed"]),
+        _format_metric("nexusgate_cache_hits_total", _metrics["cache_hits"]),
+        _format_metric("nexusgate_cache_misses_total", _metrics["cache_misses"]),
+        _format_metric("nexusgate_db_queries_total", _metrics["db_queries_total"]),
+        _format_metric("nexusgate_db_query_errors_total", _metrics["db_query_errors"]),
+    ]
 
     return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")

@@ -26,3 +26,14 @@ def parse_size(size_str: str) -> int:
     }
     
     return val * multiplier[unit]
+
+def format_size(size_bytes: int) -> str:
+    """Format bytes into a human-readable string (e.g. 10485760 -> '10.00 MB')."""
+    if size_bytes < 0:
+        return "0 B"
+    units = ["B", "KB", "MB", "GB", "TB", "PB"]
+    for unit in units:
+        if abs(size_bytes) < 1024.0:
+            return f"{size_bytes:.2f} {unit}" if unit != "B" else f"{size_bytes} B"
+        size_bytes /= 1024.0
+    return f"{size_bytes:.2f} PB"

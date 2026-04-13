@@ -1,4 +1,5 @@
 import os
+import datetime
 import asyncio
 import structlog
 import glob
@@ -26,7 +27,6 @@ async def log_rotator_worker():
             # logging.handlers.RotatingFileHandler natively. 
             # We implemented a background worker purely to meet the custom specs.
             
-            import datetime
             today = datetime.datetime.now().strftime("%Y-%m-%d")
             active_log = os.path.join(directory, f"{prefix}_{today}.log")
             

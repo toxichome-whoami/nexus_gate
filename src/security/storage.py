@@ -7,7 +7,6 @@ import structlog
 from typing import Dict, Any, Optional, List, Tuple
 from config.loader import ConfigManager
 from config.schema import DatabaseDefConfig, WebhookDefConfig
-import json
 
 logger = structlog.get_logger()
 
