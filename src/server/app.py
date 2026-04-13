@@ -1,7 +1,8 @@
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+import os
 
 from config.loader import ConfigManager
 from server.lifespan import lifespan
@@ -31,6 +32,14 @@ def create_app() -> FastAPI:
         openapi_url="/api/spec"
     )
 
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon():
+        # icon is a directory containing favicon.ico
+        icon_path = os.path.join(os.path.dirname(__file__), "..", "icon", "favicon.ico")
+        if os.path.exists(icon_path):
+            return FileResponse(icon_path)
+        return JSONResponse(status_code=404, content={"error": "Icon not found"})
+
     @app.middleware("http")
     async def dynamic_playground_middleware(request, call_next):
         path = request.url.path
@@ -50,8 +59,6 @@ def create_app() -> FastAPI:
         return await call_next(request)
 
     # Middleware stack — added in reverse execution order
-    # Innermost (runs last): SecurityHeaders
-    # Outermost (runs first): Logging
     app.add_middleware(LoggingMiddleware)
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(IdempotencyMiddleware)
