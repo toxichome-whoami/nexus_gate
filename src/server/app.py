@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -67,12 +67,21 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
 
+    # --- API Versioning (v1) ---
+    api_v1 = APIRouter(prefix="/api/v1")
+
+    # Include functional routers with their specific prefixes
+    api_v1.include_router(database.router, prefix="/db")
+    api_v1.include_router(storage.router, prefix="/fs")
+    api_v1.include_router(federation.router, prefix="/fed")
+    api_v1.include_router(admin_router, prefix="/admin")
+
+    # Register the versioned API
+    app.include_router(api_v1)
+
+    # Core system routes (usually not versioned)
     app.include_router(health.router)
     app.include_router(metrics_router)
-    app.include_router(database.router)
-    app.include_router(storage.router)
-    app.include_router(federation.router)
-    app.include_router(admin_router)
 
     # Add custom exception handlers
     @app.exception_handler(StarletteHTTPException)

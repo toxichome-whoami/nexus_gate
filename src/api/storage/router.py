@@ -1,5 +1,5 @@
 from fastapi import APIRouter
 
-router = APIRouter(prefix="/api/fs", tags=["storage"])
+router = APIRouter(tags=["storage"])
 
 from . import handlers

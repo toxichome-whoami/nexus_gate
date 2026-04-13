@@ -22,13 +22,13 @@ An open-source, industrial-grade, unified API gateway for databases and file sto
 ## Example CURL
 ```bash
 # Query Database
-curl -X POST "http://localhost:4500/api/db/main_db/query" \
+curl -X POST "http://localhost:4500/api/v1/db/main_db/query" \
      -H "Authorization: Bearer <API_KEY>" \
      -H "Content-Type: application/json" \
      -d '{"sql": "SELECT id, name FROM users WHERE active = :status", "params": {"status": true}}'
 
 # Storage Upload Setup
-curl -X POST "http://localhost:4500/api/fs/local_fs/upload" \
+curl -X POST "http://localhost:4500/api/v1/fs/local_fs/upload" \
      -H "Authorization: Bearer <API_KEY>" \
      -d '{"action": "initiate", "filename": "test.png", "total_size": 10240, "path": "/foo/test.png", "checksum_sha256": "..."}'
 ```

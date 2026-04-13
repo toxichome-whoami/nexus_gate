@@ -14,7 +14,7 @@ Authorization: Bearer base64(<key_name>:<secret>)
 # To generate the token in bash:
 # TOKEN=$(echo -n "admin:your_secret_here" | base64)
 
-curl -X GET "http://localhost:4500/api/db/databases" \
+curl -X GET "http://localhost:4500/api/v1/db/databases" \
      -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -54,17 +54,17 @@ curl -X GET "http://localhost:4500/api/spec" \
 
 ---
 
-## Database API `/api/db`
+## Database API `/api/v1/db`
 
 ### 1. List Databases
 ```bash
-curl -X GET "http://localhost:4500/api/db/databases" \
+curl -X GET "http://localhost:4500/api/v1/db/databases" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
 ### 2. List Tables
 ```bash
-curl -X GET "http://localhost:4500/api/db/main_db/tables" \
+curl -X GET "http://localhost:4500/api/v1/db/main_db/tables" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -73,7 +73,7 @@ curl -X GET "http://localhost:4500/api/db/main_db/tables" \
 > Raw SQL is validated by AST parser. Dangerous operations blocked per config.
 
 ```bash
-curl -X POST "http://localhost:4500/api/db/main_db/query" \
+curl -X POST "http://localhost:4500/api/v1/db/main_db/query" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{
@@ -84,7 +84,7 @@ curl -X POST "http://localhost:4500/api/db/main_db/query" \
 
 ### 4. Fetch Rows (with filtering)
 ```bash
-curl -G "http://localhost:4500/api/db/main_db/users/rows" \
+curl -G "http://localhost:4500/api/v1/db/main_db/users/rows" \
      -H "Authorization: Bearer <TOKEN>" \
      --data-urlencode "page=1" \
      --data-urlencode "limit=50" \
@@ -96,7 +96,7 @@ curl -G "http://localhost:4500/api/db/main_db/users/rows" \
 
 ### 5. Insert Rows
 ```bash
-curl -X POST "http://localhost:4500/api/db/main_db/users/rows" \
+curl -X POST "http://localhost:4500/api/v1/db/main_db/users/rows" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{
@@ -106,7 +106,7 @@ curl -X POST "http://localhost:4500/api/db/main_db/users/rows" \
 
 ### 6. Update Rows
 ```bash
-curl -X PUT "http://localhost:4500/api/db/main_db/users/rows" \
+curl -X PUT "http://localhost:4500/api/v1/db/main_db/users/rows" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{
@@ -117,7 +117,7 @@ curl -X PUT "http://localhost:4500/api/db/main_db/users/rows" \
 
 ### 7. Delete Rows
 ```bash
-curl -X DELETE "http://localhost:4500/api/db/main_db/users/rows" \
+curl -X DELETE "http://localhost:4500/api/v1/db/main_db/users/rows" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{
@@ -127,7 +127,7 @@ curl -X DELETE "http://localhost:4500/api/db/main_db/users/rows" \
 
 ---
 
-## Storage API `/api/fs`
+## Storage API `/api/v1/fs`
 
 ### 1. List Storages
 ```bash
@@ -137,22 +137,22 @@ curl -X GET "http://localhost:4500/api/fs/storages" \
 
 ### 2. List Folder
 ```bash
-curl -X GET "http://localhost:4500/api/fs/local_fs/list?path=/subfolder" \
+curl -X GET "http://localhost:4500/api/v1/fs/local_fs/list?path=/subfolder" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
 ### 3. Download File or Folder
 ```bash
 # Inline view of a file
-curl -X GET "http://localhost:4500/api/fs/local_fs/download?path=/image.png&inline=true" \
+curl -X GET "http://localhost:4500/api/v1/fs/local_fs/download?path=/image.png&inline=true" \
      -H "Authorization: Bearer <TOKEN>" -O
 
 # Download with image resizing
-curl -X GET "http://localhost:4500/api/fs/local_fs/download?path=/image.png&width=300&height=200" \
+curl -X GET "http://localhost:4500/api/v1/fs/local_fs/download?path=/image.png&width=300&height=200" \
      -H "Authorization: Bearer <TOKEN>" -o thumb.png
 
 # Download folder as ZIP archive automatically
-curl -X GET "http://localhost:4500/api/fs/local_fs/download?path=/reports_folder" \
+curl -X GET "http://localhost:4500/api/v1/fs/local_fs/download?path=/reports_folder" \
      -H "Authorization: Bearer <TOKEN>" -o reports.zip
 ```
 
@@ -168,14 +168,14 @@ curl -X POST "http://localhost:4500/api/fs/local_fs/upload" \
 ### 5. Chunked Upload (Large Files)
 ```bash
 # Step 1: Initiate
-curl -X POST "http://localhost:4500/api/fs/local_fs/upload" \
+curl -X POST "http://localhost:4500/api/v1/fs/local_fs/upload" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{"action":"initiate", "filename":"video.mp4", "path":"/uploads/video.mp4", "total_size":104857600, "checksum_sha256":"abc123..."}'
 # Note the `upload_id` returned
 
 # Step 2: Upload Chunks
-curl -X POST "http://localhost:4500/api/fs/local_fs/upload" \
+curl -X POST "http://localhost:4500/api/v1/fs/local_fs/upload" \
      -H "Authorization: Bearer <TOKEN>" \
      -F "action=chunk" \
      -F "upload_id=upl_xxx" \
@@ -184,7 +184,7 @@ curl -X POST "http://localhost:4500/api/fs/local_fs/upload" \
      -F "file=@chunk0.bin"
 
 # Step 3: Finalize
-curl -X POST "http://localhost:4500/api/fs/local_fs/upload" \
+curl -X POST "http://localhost:4500/api/v1/fs/local_fs/upload" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{"action":"finalize", "upload_id":"upl_xxx"}'
@@ -199,7 +199,7 @@ All file actions are sent as `POST` requests to `/{alias}/action` with a JSON bo
 
 #### Rename / Move / Copy
 ```bash
-curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
+curl -X POST "http://localhost:4500/api/v1/fs/local_fs/action" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{
@@ -217,7 +217,7 @@ curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
 
 #### Delete
 ```bash
-curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
+curl -X POST "http://localhost:4500/api/v1/fs/local_fs/action" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{"action": "delete", "source": "/unwanted.txt"}'
@@ -225,7 +225,7 @@ curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
 
 #### Create Directory
 ```bash
-curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
+curl -X POST "http://localhost:4500/api/v1/fs/local_fs/action" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{"action": "mkdir", "source": "/new_folder"}'
@@ -234,7 +234,7 @@ curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
 #### File Info
 Returns detailed metadata: name, type, size, human-readable size, MIME type, timestamps, and item count for directories.
 ```bash
-curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
+curl -X POST "http://localhost:4500/api/v1/fs/local_fs/action" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{"action": "info", "source": "/reports/Q1.pdf"}'
@@ -262,7 +262,7 @@ curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
 #### Check Existence
 Lightweight boolean check — does not transfer file data.
 ```bash
-curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
+curl -X POST "http://localhost:4500/api/v1/fs/local_fs/action" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{"action": "exists", "source": "/config/app.yml"}'
@@ -282,7 +282,7 @@ curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
 #### Bulk Delete
 Delete multiple files/directories in a single request. Each item reports its own success/failure status.
 ```bash
-curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
+curl -X POST "http://localhost:4500/api/v1/fs/local_fs/action" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{
@@ -308,7 +308,7 @@ curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
 #### Bulk Move
 Move multiple files/directories in a single request. Provide an `operations` array of `{source, target}` pairs.
 ```bash
-curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
+curl -X POST "http://localhost:4500/api/v1/fs/local_fs/action" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{
@@ -335,7 +335,7 @@ curl -X POST "http://localhost:4500/api/fs/local_fs/action" \
 
 ---
 
-## Admin API `/api/admin`
+## Admin API `/api/v1/admin`
 
 All admin endpoints require an API key with `full_admin` set to `true` in `config.toml`.
 
@@ -349,14 +349,14 @@ All admin endpoints require an API key with `full_admin` set to `true` in `confi
 #### List All API Keys
 Shows both static (`config.toml`) and dynamic (`SQLite`) keys. Secrets are never exposed.
 ```bash
-curl -X GET "http://localhost:4500/api/admin/keys" \
+curl -X GET "http://localhost:4500/api/v1/admin/keys" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
 #### Create Dynamic API Key
 Generates a new key with a cryptographically secure secret (32-64 chars). The raw secret and a ready-to-use Bearer token are returned **once** and cannot be retrieved again.
 ```bash
-curl -X POST "http://localhost:4500/api/admin/keys" \
+curl -X POST "http://localhost:4500/api/v1/admin/keys" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{
@@ -371,14 +371,14 @@ curl -X POST "http://localhost:4500/api/admin/keys" \
 #### Revoke API Key
 Dynamic keys are deleted from SQLite. Static keys (from `config.toml`) are permanently banned instead.
 ```bash
-curl -X DELETE "http://localhost:4500/api/admin/keys/service_bot_1" \
+curl -X DELETE "http://localhost:4500/api/v1/admin/keys/service_bot_1" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
 #### Update Dynamic API Key
 Partially update an existing dynamic key's properties. The API key secret **cannot** be changed. Static keys from `config.toml` cannot be modified.
 ```bash
-curl -X PATCH "http://localhost:4500/api/admin/keys/actions" \
+curl -X PATCH "http://localhost:4500/api/v1/admin/keys/actions" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{
@@ -395,14 +395,14 @@ curl -X PATCH "http://localhost:4500/api/admin/keys/actions" \
 
 #### List Active Bans
 ```bash
-curl -X GET "http://localhost:4500/api/admin/bans" \
+curl -X GET "http://localhost:4500/api/v1/admin/bans" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
 #### Ban an IP Address
 Set `duration_seconds` to `null` for a permanent ban.
 ```bash
-curl -X POST "http://localhost:4500/api/admin/bans/ip" \
+curl -X POST "http://localhost:4500/api/v1/admin/bans/ip" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{
@@ -414,13 +414,13 @@ curl -X POST "http://localhost:4500/api/admin/bans/ip" \
 
 #### Unban an IP Address
 ```bash
-curl -X DELETE "http://localhost:4500/api/admin/bans/ip/192.168.1.100" \
+curl -X DELETE "http://localhost:4500/api/v1/admin/bans/ip/192.168.1.100" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
 #### Ban an API Key
 ```bash
-curl -X POST "http://localhost:4500/api/admin/bans/key" \
+curl -X POST "http://localhost:4500/api/v1/admin/bans/key" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{
@@ -432,7 +432,7 @@ curl -X POST "http://localhost:4500/api/admin/bans/key" \
 
 #### Unban an API Key
 ```bash
-curl -X DELETE "http://localhost:4500/api/admin/bans/key/legacy_key_2" \
+curl -X DELETE "http://localhost:4500/api/v1/admin/bans/key/legacy_key_2" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -442,13 +442,13 @@ curl -X DELETE "http://localhost:4500/api/admin/bans/key/legacy_key_2" \
 
 #### View Circuit Breaker States
 ```bash
-curl -X GET "http://localhost:4500/api/admin/circuit-breakers" \
+curl -X GET "http://localhost:4500/api/v1/admin/circuit-breakers" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
 #### Reset a Circuit Breaker
 ```bash
-curl -X POST "http://localhost:4500/api/admin/circuit-breakers/main_db/reset" \
+curl -X POST "http://localhost:4500/api/v1/admin/circuit-breakers/main_db/reset" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -459,14 +459,14 @@ curl -X POST "http://localhost:4500/api/admin/circuit-breakers/main_db/reset" \
 #### List Databases
 Shows all connected databases (both static and dynamic). Connection URLs are always redacted.
 ```bash
-curl -X GET "http://localhost:4500/api/admin/databases" \
+curl -X GET "http://localhost:4500/api/v1/admin/databases" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
 #### Create Dynamic Database
 Adds a new database connection at runtime. Persisted in SQLite and survives restarts.
 ```bash
-curl -X POST "http://localhost:4500/api/admin/databases" \
+curl -X POST "http://localhost:4500/api/v1/admin/databases" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{
@@ -483,14 +483,14 @@ curl -X POST "http://localhost:4500/api/admin/databases" \
 #### Delete Dynamic Database
 Only removes databases that were added via the API. Static databases from `config.toml` cannot be deleted.
 ```bash
-curl -X DELETE "http://localhost:4500/api/admin/databases/analytics_db" \
+curl -X DELETE "http://localhost:4500/api/v1/admin/databases/analytics_db" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
 #### Update Dynamic Database
 Partially update an existing dynamic database's connection settings. `query_whitelist` and `query_blacklist` can only be set in `config.toml`.
 ```bash
-curl -X PATCH "http://localhost:4500/api/admin/databases/actions" \
+curl -X PATCH "http://localhost:4500/api/v1/admin/databases/actions" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{
@@ -507,14 +507,14 @@ curl -X PATCH "http://localhost:4500/api/admin/databases/actions" \
 #### List Webhooks
 Shows all registered webhooks. HMAC secrets are always redacted.
 ```bash
-curl -X GET "http://localhost:4500/api/admin/webhooks" \
+curl -X GET "http://localhost:4500/api/v1/admin/webhooks" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
 #### Create Dynamic Webhook
 Adds a new webhook listener at runtime. The HMAC signing secret is **auto-generated** (32–64 chars) and returned **once** — store it securely. Persisted in SQLite.
 ```bash
-curl -X POST "http://localhost:4500/api/admin/webhooks" \
+curl -X POST "http://localhost:4500/api/v1/admin/webhooks" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{
@@ -528,14 +528,14 @@ curl -X POST "http://localhost:4500/api/admin/webhooks" \
 #### Delete Dynamic Webhook
 Only removes webhooks that were added via the API. Static webhooks from `config.toml` cannot be deleted.
 ```bash
-curl -X DELETE "http://localhost:4500/api/admin/webhooks/audit_hook" \
+curl -X DELETE "http://localhost:4500/api/v1/admin/webhooks/audit_hook" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
 #### Update Dynamic Webhook
 Partially update an existing dynamic webhook's properties. The HMAC secret **cannot** be changed.
 ```bash
-curl -X PATCH "http://localhost:4500/api/admin/webhooks/actions" \
+curl -X PATCH "http://localhost:4500/api/v1/admin/webhooks/actions" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{
@@ -552,24 +552,24 @@ curl -X PATCH "http://localhost:4500/api/admin/webhooks/actions" \
 #### View Live Config
 Returns the full running configuration with all secrets, URLs, and API keys redacted.
 ```bash
-curl -X GET "http://localhost:4500/api/admin/config" \
+curl -X GET "http://localhost:4500/api/v1/admin/config" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
 #### View Rate Limit Overrides
 Shows global rate limit settings and any per-key overrides (from both static and dynamic keys).
 ```bash
-curl -X GET "http://localhost:4500/api/admin/rate-limits" \
+curl -X GET "http://localhost:4500/api/v1/admin/rate-limits" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
 ---
 
-## Federation API `/api/fed`
+## Federation API `/api/v1/fed`
 
 ### 1. List Federated Servers
 ```bash
-curl -X GET "http://localhost:4500/api/fed/servers" \
+curl -X GET "http://localhost:4500/api/v1/fed/servers" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 

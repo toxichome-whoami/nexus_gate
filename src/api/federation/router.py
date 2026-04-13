@@ -1,5 +1,5 @@
 from fastapi import APIRouter
 
-router = APIRouter(prefix="/api/fed", tags=["federation"])
+router = APIRouter(tags=["federation"])
 
 from . import handlers

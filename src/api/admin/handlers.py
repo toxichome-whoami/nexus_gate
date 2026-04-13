@@ -19,7 +19,7 @@ from security.circuit_breaker import CircuitBreaker
 from security.storage import SecurityStorage
 from db.pool import DatabasePoolManager
 
-router = APIRouter(prefix="/api/admin", tags=["admin"])
+router = APIRouter(tags=["admin"])
 
 
 # ─── API Key Management ───────────────────────────────────────────────────────
