@@ -2,36 +2,50 @@ import time
 import os
 import uuid
 
-def uuid7() -> uuid.UUID:
-    """Generate a UUID version 7 (time-ordered).
-    Format: 48 bits timestamp (ms) | 12 bits version | 2 bits var | 62 bits random.
-    """
-    timestamp_ms = int(time.time() * 1000)
-    
-    # 48 bits of timestamp
+def _get_current_timestamp_ms() -> int:
+    """Returns the current precise POSIX epoch mapped to milliseconds."""
+    return int(time.time() * 1000)
+
+def _generate_time_components(timestamp_ms: int) -> tuple[int, int]:
+    """Isolates the 48-bit timestamp into high (32-bit) and mid (16-bit) fields."""
     time_high = timestamp_ms >> 16
     time_mid = timestamp_ms & 0xFFFF
+    return time_high, time_mid
+
+def _generate_random_components() -> tuple[int, int]:
+    """Constructs cryptographically secure randomness bits for the sequence."""
+    random_high = int.from_bytes(os.urandom(2), "big") & 0x0FFF
+    random_low = int.from_bytes(os.urandom(8), "big")
+    return random_high, random_low
+
+def uuid7() -> uuid.UUID:
+    """
+    Generates a UUID version 7 identifier.
     
-    # 12 bits version 7, 62 bits random
-    rand_a = int.from_bytes(os.urandom(2), "big") & 0x0FFF
-    rand_b_bytes = os.urandom(8)
-    rand_b = int.from_bytes(rand_b_bytes, "big")
+    Format guarantees strict time-ordering which vastly improves database
+    indexing performance over random v4 UUIDs, while preventing collisions.
+    Structure: 48-bit timestamp (ms) | 12-bit version | 2-bit variation | 62-bit random.
+    """
+    current_ms = _get_current_timestamp_ms()
     
-    # Apply version 7 to rand_a
-    time_hi_and_version = rand_a | (7 << 12)
+    time_high, time_mid = _generate_time_components(current_ms)
+    random_high, random_low = _generate_random_components()
     
-    # Apply variant (10) to clock_seq_hi_and_reserved
-    clock_seq_hi_and_reserved = (rand_b >> 56) & 0x3F | 0x80
-    clock_seq_low = (rand_b >> 48) & 0xFF
-    node = rand_b & 0xFFFFFFFFFFFF
+    # Multiplex Version 7 layout into the first random segment
+    versioned_high_sequence = random_high | (7 << 12)
+    
+    # Enforce standard UUID variant constraints (1 0) onto the lower sequence
+    clock_sequence_variant = (random_low >> 56) & 0x3F | 0x80
+    clock_seq_low = (random_low >> 48) & 0xFF
+    node_id = random_low & 0xFFFFFFFFFFFF
     
     return uuid.UUID(
         fields=(
             time_high,
             time_mid,
-            time_hi_and_version,
-            clock_seq_hi_and_reserved,
+            versioned_high_sequence,
+            clock_sequence_variant,
             clock_seq_low,
-            node
+            node_id
         )
     )

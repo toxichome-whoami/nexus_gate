@@ -13,10 +13,13 @@ from config.loader import ConfigManager
 
 router = APIRouter()
 
-# In-memory counters (for a full deployment, use prometheus_client library)
+# ─────────────────────────────────────────────────────────────────────────────
+# In-Memory Counter Storage
+# ─────────────────────────────────────────────────────────────────────────────
+
 _metrics: dict = {
-    "requests_total": {},       # (method, path, status) -> count
-    "requests_duration_ms": [], # list of durations
+    "requests_total": {},
+    "requests_duration_ms": [],
     "rate_limit_hits": 0,
     "auth_failures": 0,
     "webhook_delivered": 0,
@@ -29,8 +32,12 @@ _metrics: dict = {
 
 _start_time = time.time()
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Tracking Appends
+# ─────────────────────────────────────────────────────────────────────────────
+
 def increment(key: str, labels: dict = None):
-    """Increment a named counter, optionally scoped by labels."""
+    """Mutates global counters pushing bounded data footprints."""
     global _metrics
     if labels:
         label_key = f"{key}|{','.join(f'{k}={v}' for k,v in sorted(labels.items()))}"
@@ -39,66 +46,54 @@ def increment(key: str, labels: dict = None):
         _metrics[key] = _metrics.get(key, 0) + 1
 
 def record_duration(duration_ms: float):
+    """Ingests latency aggregates explicitly garbage-collecting older frames."""
     _metrics["requests_duration_ms"].append(duration_ms)
-    # Keep only the last 10000 samples to bound memory
     if len(_metrics["requests_duration_ms"]) > 10000:
         _metrics["requests_duration_ms"] = _metrics["requests_duration_ms"][-5000:]
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Format Renderers
+# ─────────────────────────────────────────────────────────────────────────────
+
 def _format_metric(name: str, value, labels: dict = None, help_text: str = "", metric_type: str = "counter") -> str:
+    """Renders explicitly valid Prometheus textual targets."""
     lines = []
     if help_text:
         lines.append(f"# HELP {name} {help_text}")
     lines.append(f"# TYPE {name} {metric_type}")
+    
     if labels:
         label_str = ",".join(f'{k}="{v}"' for k, v in labels.items())
         lines.append(f"{name}{{{label_str}}} {value}")
     else:
         lines.append(f"{name} {value}")
+        
     return "\n".join(lines)
 
-@router.get("/metrics", include_in_schema=False)
-async def metrics_endpoint(request: Request, format: str = "prometheus"):
-    proc = psutil.Process(os.getpid())
-    mem_mb = proc.memory_info().rss / 1024 / 1024
-    cpu_pct = proc.cpu_percent()
-    uptime = time.time() - _start_time
-
-    durations = _metrics["requests_duration_ms"]
-    avg_duration = sum(durations) / len(durations) if durations else 0
-    p99 = sorted(durations)[int(len(durations) * 0.99)] if len(durations) > 100 else avg_duration
-
-    # 1. Clean JSON Format for Humans
-    if format == "json":
-        return {
-            "status": "online",
-            "uptime_seconds": round(uptime, 2),
-            "system": {
-                "memory_mb": round(mem_mb, 2),
-                "cpu_percent": round(cpu_pct, 2)
-            },
-            "performance": {
-                "avg_request_ms": round(avg_duration, 3),
-                "p99_request_ms": round(p99, 3)
-            },
-            "counters": {
-                "rate_limit_hits": _metrics["rate_limit_hits"],
-                "auth_failures": _metrics["auth_failures"],
-                "cache": {
-                    "hits": _metrics["cache_hits"],
-                    "misses": _metrics["cache_misses"]
-                },
-                "database": {
-                    "queries": _metrics["db_queries_total"],
-                    "errors": _metrics["db_query_errors"]
-                },
-                "webhooks": {
-                    "delivered": _metrics["webhook_delivered"],
-                    "failed": _metrics["webhook_failed"]
-                }
-            }
+def _build_json_metrics(uptime, mem_mb, cpu_pct, avg_duration, p99) -> dict:
+    """Renders human-readable hierarchical JSON models targeting visual dashboards."""
+    return {
+        "status": "online",
+        "uptime_seconds": round(uptime, 2),
+        "system": {
+            "memory_mb": round(mem_mb, 2),
+            "cpu_percent": round(cpu_pct, 2)
+        },
+        "performance": {
+            "avg_request_ms": round(avg_duration, 3),
+            "p99_request_ms": round(p99, 3)
+        },
+        "counters": {
+            "rate_limit_hits": _metrics["rate_limit_hits"],
+            "auth_failures": _metrics["auth_failures"],
+            "cache": {"hits": _metrics["cache_hits"], "misses": _metrics["cache_misses"]},
+            "database": {"queries": _metrics["db_queries_total"], "errors": _metrics["db_query_errors"]},
+            "webhooks": {"delivered": _metrics["webhook_delivered"], "failed": _metrics["webhook_failed"]}
         }
+    }
 
-    # 2. Raw Prometheus Format for Machines
+def _build_prometheus_metrics(uptime, mem_mb, cpu_pct, avg_duration, p99) -> PlainTextResponse:
+    """Binds pure text execution streams strictly compatible with OpenMetrics v0.0.4 formats."""
     lines = [
         "# NexusGate Metrics",
         _format_metric("nexusgate_uptime_seconds", round(uptime, 2), help_text="Server uptime", metric_type="gauge"),
@@ -115,5 +110,24 @@ async def metrics_endpoint(request: Request, format: str = "prometheus"):
         _format_metric("nexusgate_db_queries_total", _metrics["db_queries_total"]),
         _format_metric("nexusgate_db_query_errors_total", _metrics["db_query_errors"]),
     ]
-
     return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Protected Endpoint
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/metrics", include_in_schema=False)
+async def metrics_endpoint(request: Request, format: str = "prometheus"):
+    proc = psutil.Process(os.getpid())
+    mem_mb = proc.memory_info().rss / 1024 / 1024
+    cpu_pct = proc.cpu_percent()
+    uptime = time.time() - _start_time
+
+    durations = _metrics["requests_duration_ms"]
+    avg_duration = sum(durations) / len(durations) if durations else 0
+    p99 = sorted(durations)[int(len(durations) * 0.99)] if len(durations) > 100 else avg_duration
+
+    if format == "json":
+        return _build_json_metrics(uptime, mem_mb, cpu_pct, avg_duration, p99)
+
+    return _build_prometheus_metrics(uptime, mem_mb, cpu_pct, avg_duration, p99)

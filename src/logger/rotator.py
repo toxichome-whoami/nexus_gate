@@ -8,8 +8,61 @@ from utils.size_parser import parse_size
 
 logger = structlog.get_logger()
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Internal Subsystems
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_next_rotated_path(directory: str, prefix: str, today: str) -> str:
+    """Scans existing rolled logs to determine the next sequential suffix."""
+    idx = 1
+    while True:
+        rotated_name = os.path.join(directory, f"{prefix}_{today}_{idx:03d}.log")
+        if not os.path.exists(rotated_name):
+            return rotated_name
+        idx += 1
+
+def _rotate_active_log(active_log: str, max_size_bytes: int, directory: str, prefix: str, today: str):
+    """Checks the live log file size and moves it to a sequential suffix if over limit."""
+    if not os.path.exists(active_log):
+        return
+
+    size = os.path.getsize(active_log)
+    if size <= max_size_bytes:
+        return
+
+    rotated_name = _get_next_rotated_path(directory, prefix, today)
+        
+    try:
+        os.rename(active_log, rotated_name)
+        logger.info("Rotated log file", old=active_log, new=rotated_name, size=size)
+    except Exception as rotation_error:
+        logger.error("Failed to rotate log", error=str(rotation_error))
+
+def _garbage_collect_logs(directory: str, prefix: str, max_files: int):
+    """Enforces the file retention policy by purging the oldest logs physically."""
+    pattern = os.path.join(directory, f"{prefix}_*.log")
+    all_logs = glob.glob(pattern)
+    
+    if len(all_logs) <= max_files:
+        return
+
+    # Sort strictly by modification time ascending (oldest first)
+    all_logs.sort(key=os.path.getmtime)
+    
+    old_files_to_delete = all_logs[:-max_files]
+    for target_file in old_files_to_delete:
+        try:
+            os.remove(target_file)
+            logger.debug("Deleted old log file during GC", file=target_file)
+        except Exception as delete_error:
+            logger.error("Failed to delete log file", file=target_file, error=str(delete_error))
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Core Daemon
+# ─────────────────────────────────────────────────────────────────────────────
+
 async def log_rotator_worker():
-    """Background task to rotate logs and GC old ones."""
+    """Background daemon invoking custom log rotations sequentially."""
     logger.info("Log rotator started")
     config = ConfigManager.get()
     
@@ -20,56 +73,16 @@ async def log_rotator_worker():
     
     while True:
         try:
-            await asyncio.sleep(60) # Check every minute
-            
-            # Simple rotation mechanism
-            # Real world production apps typically use tools like logrotate or 
-            # logging.handlers.RotatingFileHandler natively. 
-            # We implemented a background worker purely to meet the custom specs.
+            await asyncio.sleep(60) # Interval scan
             
             today = datetime.datetime.now().strftime("%Y-%m-%d")
             active_log = os.path.join(directory, f"{prefix}_{today}.log")
             
-            # 1. Rotate
-            if os.path.exists(active_log):
-                size = os.path.getsize(active_log)
-                if size > max_size_bytes:
-                    # Find next suffix _001, _002 etc
-                    idx = 1
-                    while True:
-                        rotated_name = os.path.join(directory, f"{prefix}_{today}_{idx:03d}.log")
-                        if not os.path.exists(rotated_name):
-                            break
-                        idx += 1
-                        
-                    try:
-                        os.rename(active_log, rotated_name)
-                        logger.info("Rotated log file", old=active_log, new=rotated_name, size=size)
-                        
-                        # Softly notify logging to re-open file handles (needs custom signals or restart)
-                        # For now we assume logging.FileHandler will just keep writing if we did a soft rename
-                        # but proper rotation requires specific logger setups.
-                    except Exception as e:
-                        logger.error("Failed to rotate log", error=str(e))
-                        
-            # 2. GC Old Files
-            pattern = os.path.join(directory, f"{prefix}_*.log")
-            all_logs = glob.glob(pattern)
-            
-            if len(all_logs) > max_files:
-                # Sort by parsed suffix / modification time
-                all_logs.sort(key=os.path.getmtime)
-                # Delete oldest
-                to_delete = all_logs[:-max_files]
-                for f in to_delete:
-                    try:
-                        os.remove(f)
-                        logger.debug("Deleted old log file during GC", file=f)
-                    except Exception as e:
-                        logger.error("Failed to delete log file", file=f, error=str(e))
+            _rotate_active_log(active_log, max_size_bytes, directory, prefix, today)
+            _garbage_collect_logs(directory, prefix, max_files)
                         
         except asyncio.CancelledError:
             logger.info("Log rotator shutting down")
             break
-        except Exception as e:
-            logger.error("Log rotator encountered error", error=str(e))
+        except Exception as iteration_error:
+            logger.error("Log rotator encountered error", error=str(iteration_error))

@@ -21,87 +21,106 @@ class CircuitState(str, Enum):
 class CircuitBreaker:
     """Per-resource circuit breaker tracking failure/success windows."""
 
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Internal Helpers
+    # ─────────────────────────────────────────────────────────────────────────────
+
     @classmethod
     def _get_circuit(cls, key: str) -> dict:
         return SecurityStorage.get_circuit_cache(key)
 
     @classmethod
+    def _is_enabled(cls) -> bool:
+        return ConfigManager.get().circuit_breaker.enabled
+
+    @classmethod
+    def _persist_state(cls, key: str, circuit: dict):
+        """Asynchronously triggers the storage layer to commit state without blocking."""
+        asyncio.create_task(SecurityStorage.update_circuit(
+            key, circuit["state"], circuit["failures"], 
+            circuit["successes"], circuit["last_failure_time"], circuit["tripped_at"]
+        ))
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Core Logic
+    # ─────────────────────────────────────────────────────────────────────────────
+
+    @classmethod
     def is_open(cls, key: str) -> bool:
-        config = ConfigManager.get()
-        cb = config.circuit_breaker
-        if not cb.enabled:
+        """Determines if the circuit is currently rejecting traffic."""
+        if not cls._is_enabled():
             return False
 
+        config = ConfigManager.get().circuit_breaker
         circuit = cls._get_circuit(key)
-        if circuit["state"] == CircuitState.OPEN.value:
-            # Check if timeout has elapsed to attempt HALF_OPEN
-            if circuit["tripped_at"] and (time.time() - circuit["tripped_at"]) >= cb.timeout:
-                circuit["state"] = CircuitState.HALF_OPEN.value
-                circuit["successes"] = 0
-                logger.info("Circuit half-opened", key=key)
-                
-                # Persist state change
-                asyncio.create_task(SecurityStorage.update_circuit(
-                    key, circuit["state"], circuit["failures"], 
-                    circuit["successes"], circuit["last_failure_time"], circuit["tripped_at"]
-                ))
-                return False
-            return True
-        return False
+
+        # Fast path
+        if circuit["state"] != CircuitState.OPEN.value:
+            return False
+
+        # If Open, check if timeout elapsed to attempt Half-Open
+        tripped_at = circuit["tripped_at"]
+        if tripped_at and (time.time() - tripped_at) >= config.timeout:
+            circuit["state"] = CircuitState.HALF_OPEN.value
+            circuit["successes"] = 0
+            logger.info("Circuit half-opened", key=key)
+            cls._persist_state(key, circuit)
+            return False
+
+        return True
 
     @classmethod
     def record_success(cls, key: str):
-        config = ConfigManager.get()
-        cb = config.circuit_breaker
-        if not cb.enabled:
+        """Acknowledges a successful request, contributing to healing."""
+        if not cls._is_enabled():
             return
 
+        config = ConfigManager.get().circuit_breaker
         circuit = cls._get_circuit(key)
         state_changed = False
         
+        # Heal from HALF_OPEN
         if circuit["state"] == CircuitState.HALF_OPEN.value:
             circuit["successes"] += 1
-            if circuit["successes"] >= cb.success_threshold:
+            if circuit["successes"] >= config.success_threshold:
                 circuit["state"] = CircuitState.CLOSED.value
                 circuit["failures"] = 0
                 state_changed = True
                 logger.info("Circuit closed (recovered)", key=key)
+                
+        # Natural decay of failure count
         elif circuit["state"] == CircuitState.CLOSED.value:
-            # Reset failure count on success
             if circuit["failures"] > 0:
                 circuit["failures"] = max(0, circuit["failures"] - 1)
-                # We don't persist failure decr to avoid disk IO on every success
-                
+                # Note: Deliberately avoiding state persistence on natural decay to save disk I/O
+
         if state_changed:
-            asyncio.create_task(SecurityStorage.update_circuit(
-                key, circuit["state"], circuit["failures"], 
-                circuit["successes"], circuit["last_failure_time"], circuit["tripped_at"]
-            ))
+            cls._persist_state(key, circuit)
 
     @classmethod
     def record_failure(cls, key: str):
-        config = ConfigManager.get()
-        cb = config.circuit_breaker
-        if not cb.enabled:
+        """Acknowledges a failed request, moving closer to an OPEN trip."""
+        if not cls._is_enabled():
             return
 
+        config = ConfigManager.get().circuit_breaker
         circuit = cls._get_circuit(key)
         circuit["failures"] += 1
         circuit["last_failure_time"] = time.time()
-        
-        state_changed = False
 
-        if circuit["failures"] >= cb.failure_threshold and circuit["state"] != CircuitState.OPEN.value:
+        # Check Trip condition
+        should_trip = circuit["failures"] >= config.failure_threshold
+        is_closed = circuit["state"] != CircuitState.OPEN.value
+
+        if should_trip and is_closed:
             circuit["state"] = CircuitState.OPEN.value
             circuit["tripped_at"] = time.time()
-            state_changed = True
             logger.warning("Circuit tripped OPEN", key=key, failures=circuit["failures"])
+            cls._persist_state(key, circuit)
 
-        if state_changed:
-            asyncio.create_task(SecurityStorage.update_circuit(
-                key, circuit["state"], circuit["failures"], 
-                circuit["successes"], circuit["last_failure_time"], circuit["tripped_at"]
-            ))
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Introspection
+    # ─────────────────────────────────────────────────────────────────────────────
 
     @classmethod
     def get_state(cls, key: str) -> dict:
@@ -115,9 +134,9 @@ class CircuitBreaker:
 
     @classmethod
     def all_states(cls) -> Dict[str, dict]:
-        circuits = SecurityStorage.get_all_circuits()
-        return {k: cls.get_state(k) for k in circuits}
+        return {k: cls.get_state(k) for k in SecurityStorage.get_all_circuits()}
 
     @classmethod
     async def reset(cls, key: str):
+        """Manually forces a closed state overlay."""
         await SecurityStorage.update_circuit(key, CircuitState.CLOSED.value, 0, 0, None, None)

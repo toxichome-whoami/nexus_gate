@@ -26,24 +26,35 @@ router = APIRouter(tags=["admin"])
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _require_fields(mapping: dict, *fields: str) -> None:
-    """Validates that all specified fields are present and not empty in a mapping."""
+    """Validates that all specified fields are present and not empty."""
     for field in fields:
         if not mapping.get(field):
             raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, f"'{field}' is required", 400)
 
 def _generate_secure_secret() -> tuple[str, str]:
-    """
-    Generates a cryptographically secure random secret and its SHA-256 hash.
-    Returns: (raw_secret, hex_hash)
-    """
+    """Generates a cryptographically secure random secret and its SHA-256 hash."""
     alphabet = string.ascii_letters + string.digits
     length = secrets.choice(range(32, 65))
     raw_secret = "".join(secrets.choice(alphabet) for _ in range(length))
     secret_hash = hashlib.sha256(raw_secret.encode("utf-8")).hexdigest()
     return raw_secret, secret_hash
 
+def _extract_remote_databases(alias: str, db_list: dict, local_dbs: dict) -> None:
+    """Safely extracts dictionary values resolving missing payload structs cleanly."""
+    for db_name, db_info in db_list.items():
+        info_dict = db_info if isinstance(db_info, dict) else {}
+        local_dbs[f"{alias}_{db_name}"] = {
+            "engine": info_dict.get("engine", "unknown"),
+            "mode": info_dict.get("mode", "unknown"),
+            "status": info_dict.get("status", db_info) if not isinstance(db_info, dict) else info_dict.get("status", "unknown"),
+            "tables_count": info_dict.get("tables_count", 0),
+            "remote_server": alias,
+            "url": "***FEDERATED***",
+            "federated": True,
+        }
+
 def _enrich_federated_databases(local_dbs: dict, config) -> None:
-    """Appends federated remote alias databases to the local response payload."""
+    """Appends federated remote alias databases to the local payload."""
     if not config.features.federation or not config.federation.enabled:
         return
 
@@ -51,24 +62,19 @@ def _enrich_federated_databases(local_dbs: dict, config) -> None:
     state = FederationState()
     
     for alias, srv_state in state.servers.items():
-        if srv_state.get("status") != "up":
-            continue
-            
-        for db_name, db_info in srv_state.get("databases", {}).items():
-            fed_name = f"{alias}_{db_name}"
-            
-            # Use isinstance checks cleanly
-            info_dict = db_info if isinstance(db_info, dict) else {}
-            
-            local_dbs[fed_name] = {
-                "engine": info_dict.get("engine", "unknown"),
-                "mode": info_dict.get("mode", "unknown"),
-                "status": info_dict.get("status", db_info) if not isinstance(db_info, dict) else info_dict.get("status", "unknown"),
-                "tables_count": info_dict.get("tables_count", 0),
-                "remote_server": alias,
-                "url": "***FEDERATED***",
-                "federated": True,
-            }
+        if srv_state.get("status") == "up":
+            _extract_remote_databases(alias, srv_state.get("databases", {}), local_dbs)
+
+def _redact_sensitive_payloads(data: dict) -> None:
+    """Replaces all defined system secrets explicitly without recursive iteration."""
+    for key_cfg in data.get("api_key", {}).values():
+        key_cfg["secret"] = "***REDACTED***"
+    for hook_cfg in data.get("webhook", {}).values():
+        hook_cfg["secret"] = "***REDACTED***"
+    for db_cfg in data.get("database", {}).values():
+        db_cfg["url"] = "***REDACTED***"
+    for srv_cfg in data.get("federation", {}).get("server", {}).values():
+        srv_cfg["api_key"] = "***REDACTED***"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # API Key Management
@@ -76,45 +82,29 @@ def _enrich_federated_databases(local_dbs: dict, config) -> None:
 
 @router.get("/keys")
 async def list_api_keys(request: Request, auth=Depends(require_admin)):
-    """Lists static (TOML) and dynamic (SQLite) API Keys without showing secrets."""
+    """Lists static (TOML) and dynamic (SQLite) API Keys masking signatures."""
     config = ConfigManager.get()
-    keys = []
+    
+    static_keys = [
+        {
+            "name": name, "source": "config.toml", "mode": cfg.mode.value,
+            "db_scope": cfg.db_scope, "fs_scope": cfg.fs_scope,
+            "rate_limit_override": cfg.rate_limit_override, "full_admin": cfg.full_admin
+        } for name, cfg in config.api_key.items()
+    ]
+    
+    db_keys = [
+        {
+            "name": name, "source": "sqlite", "mode": data["mode"],
+            "db_scope": data["db_scope"], "fs_scope": data["fs_scope"],
+            "rate_limit_override": data["rate_limit_override"], "full_admin": False
+        } for name, data in SecurityStorage.get_all_keys().items()
+    ]
 
-    # 1. Static keys from config
-    for name, key_cfg in config.api_key.items():
-        keys.append({
-            "name": name,
-            "source": "config.toml",
-            "mode": key_cfg.mode.value,
-            "db_scope": key_cfg.db_scope,
-            "fs_scope": key_cfg.fs_scope,
-            "rate_limit_override": key_cfg.rate_limit_override,
-            "full_admin": key_cfg.full_admin
-        })
-
-    # 2. Dynamic keys from DB
-    db_keys = SecurityStorage.get_all_keys()
-    for name, key_data in db_keys.items():
-        keys.append({
-            "name": name,
-            "source": "sqlite",
-            "mode": key_data["mode"],
-            "db_scope": key_data["db_scope"],
-            "fs_scope": key_data["fs_scope"],
-            "rate_limit_override": key_data["rate_limit_override"],
-            "full_admin": False
-        })
-
-    return success_response(request, {"keys": keys})
-
+    return success_response(request, {"keys": static_keys + db_keys})
 
 @router.post("/keys")
-async def create_api_key(
-    request: Request,
-    body: dict = Body(...),
-    auth=Depends(require_admin),
-):
-    """Creates a new dynamic secure API key."""
+async def create_api_key(request: Request, body: dict = Body(...), auth=Depends(require_admin)):
     _require_fields(body, "name")
     
     name = body.get("name")
@@ -122,76 +112,55 @@ async def create_api_key(
         raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, "Key name already exists", 400)
 
     raw_secret, secret_hash = _generate_secure_secret()
-
-    mode = body.get("mode", "readwrite")
-    db_scope = body.get("db_scope", ["*"])
-    fs_scope = body.get("fs_scope", ["*"])
-    rate_limit = body.get("rate_limit_override", 0)
-
+    
     await SecurityStorage.add_api_key(
-        name=name,
-        secret_hash=secret_hash,
-        mode=mode,
-        db_scope=db_scope,
-        fs_scope=fs_scope,
-        rate_limit=rate_limit
+        name=name, secret_hash=secret_hash,
+        mode=body.get("mode", "readwrite"),
+        db_scope=body.get("db_scope", ["*"]),
+        fs_scope=body.get("fs_scope", ["*"]),
+        rate_limit=body.get("rate_limit_override", 0)
     )
-
-    bearer = base64.b64encode(f"{name}:{raw_secret}".encode()).decode()
 
     return success_response(request, {
         "name": name,
-        "mode": mode,
-        "db_scope": db_scope,
-        "fs_scope": fs_scope,
-        "rate_limit_override": rate_limit,
+        "mode": body.get("mode", "readwrite"),
+        "db_scope": body.get("db_scope", ["*"]),
+        "fs_scope": body.get("fs_scope", ["*"]),
+        "rate_limit_override": body.get("rate_limit_override", 0),
         "secret": raw_secret,
-        "bearer_token": bearer,
+        "bearer_token": base64.b64encode(f"{name}:{raw_secret}".encode()).decode(),
         "note": "Store this token now. The raw secret is not retrievable."
     })
 
-
 @router.delete("/keys/{key_name}")
-async def revoke_api_key(
-    request: Request,
-    key_name: str = Path(...),
-    auth=Depends(require_admin),
-):
-    """Deletes dynamic keys or applies an infinite ban array to static overrides."""
+async def revoke_api_key(request: Request, key_name: str = Path(...), auth=Depends(require_admin)):
     if key_name == auth.api_key_name:
         raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, "You cannot revoke your active API key", 400)
 
-    deleted_from_db = await SecurityStorage.delete_api_key(key_name)
-    
+    deleted = await SecurityStorage.delete_api_key(key_name)
     banned = False
+    
     if key_name in ConfigManager.get().api_key:
         await BanList.ban_key(key_name, reason="Revoked via admin API", duration_seconds=None)
         banned = True
 
-    if not deleted_from_db and not banned:
+    if not deleted and not banned:
         raise NexusGateException(ErrorCodes.AUTH_INVALID_KEY, f"Key '{key_name}' not found", 404)
 
-    msg = "Revoked from SQLite database." if deleted_from_db else "Banned static key (remove from config.toml to persist)."
+    msg = "Revoked from SQLite database." if deleted else "Banned static config layout."
     return success_response(request, {"revoked": key_name, "note": msg})
 
-
 @router.patch("/keys/actions")
-async def update_api_key(
-    request: Request,
-    body: dict = Body(...),
-    auth=Depends(require_admin),
-):
-    """Updates non-secret field properties on dynamic API keys."""
+async def update_api_key(request: Request, body: dict = Body(...), auth=Depends(require_admin)):
     _require_fields(body, "name")
     name = body.get("name")
 
-    # Reject static updates
     if name in ConfigManager.get().api_key:
         raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"Static key '{name}' cannot be modified", 400)
 
     updates = {k: v for k, v in body.items() if k in ["mode", "db_scope", "fs_scope", "rate_limit_override"]}
     if not updates:
-        raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "No updatable fields provided", 400)
+        raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "No valid parameters provided", 400)
 
     if not await SecurityStorage.update_api_key(name, updates):
         raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"Dynamic key '{name}' not found", 404)
@@ -209,12 +178,8 @@ async def list_bans(request: Request, auth=Depends(require_admin)):
 @router.post("/bans/ip")
 async def ban_ip(request: Request, body: dict = Body(...), auth=Depends(require_admin)):
     _require_fields(body, "ip")
-    ip = body.get("ip")
-    reason = body.get("reason", "Manual ban via admin API")
-    duration = body.get("duration_seconds")
-
-    await BanList.ban_ip(ip, reason=reason, duration_seconds=duration)
-    return success_response(request, {"banned_ip": ip, "reason": reason, "duration_seconds": duration})
+    await BanList.ban_ip(body.get("ip"), reason=body.get("reason", "Manual ban via admin API"), duration_seconds=body.get("duration_seconds"))
+    return success_response(request, {"banned_ip": body.get("ip"), "reason": body.get("reason", "Manual ban")})
 
 @router.delete("/bans/ip/{ip}")
 async def unban_ip(request: Request, ip: str = Path(...), auth=Depends(require_admin)):
@@ -225,16 +190,11 @@ async def unban_ip(request: Request, ip: str = Path(...), auth=Depends(require_a
 @router.post("/bans/key")
 async def ban_key(request: Request, body: dict = Body(...), auth=Depends(require_admin)):
     _require_fields(body, "key_name")
-    key_name = body.get("key_name")
-    
-    if key_name == auth.api_key_name:
-        raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, "Self-lockout protection: cannot ban active key", 400)
+    if body.get("key_name") == auth.api_key_name:
+        raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, "Lockout protection: cannot ban active key", 400)
 
-    reason = body.get("reason", "Manual ban via admin API")
-    duration = body.get("duration_seconds")
-
-    await BanList.ban_key(key_name, reason=reason, duration_seconds=duration)
-    return success_response(request, {"banned_key": key_name, "reason": reason})
+    await BanList.ban_key(body.get("key_name"), reason=body.get("reason", "Manual array"), duration_seconds=body.get("duration_seconds"))
+    return success_response(request, {"banned_key": body.get("key_name"), "reason": body.get("reason", "Manual array")})
 
 @router.delete("/bans/key/{key_name}")
 async def unban_key(request: Request, key_name: str = Path(...), auth=Depends(require_admin)):
@@ -256,24 +216,20 @@ async def reset_circuit_breaker(request: Request, key: str = Path(...), auth=Dep
     return success_response(request, {"reset": key, "state": "closed"})
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Service Extension (Databases and Webhooks)
+# Service Extension Hooks
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/databases")
 async def view_databases(request: Request, auth=Depends(require_admin)):
-    """Safe view of active databases masking connection URLs."""
     config = ConfigManager.get()
-    dbs = {}
     
-    for name, db_cfg in config.database.items():
-        dbs[name] = {
-            "engine": db_cfg.engine.value,
-            "mode": db_cfg.mode.value,
-            "pool_min": db_cfg.pool_min,
-            "pool_max": db_cfg.pool_max,
-            "url": "***REDACTED***",
-            "federated": False,
-        }
+    dbs = {
+        name: {
+            "engine": db_cfg.engine.value, "mode": db_cfg.mode.value,
+            "pool_min": db_cfg.pool_min, "pool_max": db_cfg.pool_max,
+            "url": "***REDACTED***", "federated": False
+        } for name, db_cfg in config.database.items()
+    }
 
     _enrich_federated_databases(dbs, config)
     return success_response(request, {"databases": dbs})
@@ -284,7 +240,7 @@ async def create_database(request: Request, body: dict = Body(...), auth=Depends
     name = body.get("name")
     
     await SecurityStorage.add_database(name, body)
-    await DatabasePoolManager.remove_engine(name) # Hot-reload hook
+    await DatabasePoolManager.remove_engine(name)
 
     return success_response(request, {"created_database": name, "note": "Database dynamically attached."})
 
@@ -298,29 +254,26 @@ async def delete_database(request: Request, name: str = Path(...), auth=Depends(
 
 @router.patch("/databases/actions")
 async def update_database(request: Request, body: dict = Body(...), auth=Depends(require_admin)):
-    """Updates configurable database pools without restarting."""
     _require_fields(body, "name")
     name = body.get("name")
     
-    # Reject blocked configurations dynamically
     if any(blocked in body for blocked in ["query_whitelist", "query_blacklist"]):
-         raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, "'query_whitelist/blacklist' are config.toml only.", 400)
+         raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, "Schema validations are config.toml only.", 400)
 
     allowed = {"engine", "url", "mode", "pool_min", "pool_max", "connection_timeout", "idle_timeout", "max_lifetime", "dangerous_operations"}
     updates = {k: v for k, v in body.items() if k in allowed}
     
     if not updates:
-        raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "No updatable fields provided", 400)
+        raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "No updatable fields", 400)
 
     if not await SecurityStorage.update_database(name, updates):
-         raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"Dynamic database '{name}' not found", 404)
+         raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"Database '{name}' missing", 404)
 
     await DatabasePoolManager.remove_engine(name)
     return success_response(request, {"updated_database": name, "changes": updates})
 
 @router.get("/webhooks")
 async def view_webhooks(request: Request, auth=Depends(require_admin)):
-    """Safe view array of defined system webhooks."""
     wh = {
         name: {"url": hook.url, "rule": hook.rule, "enabled": hook.enabled, "secret": "***REDACTED***"}
         for name, hook in ConfigManager.get().webhook.items()
@@ -330,82 +283,60 @@ async def view_webhooks(request: Request, auth=Depends(require_admin)):
 @router.post("/webhooks")
 async def create_webhook(request: Request, body: dict = Body(...), auth=Depends(require_admin)):
     _require_fields(body, "name", "url", "rule")
-    
-    name = body.get("name")
-    url = body.get("url")
-    rule = body.get("rule")
-    enabled = body.get("enabled", True)
-
     raw_secret, _ = _generate_secure_secret()
 
-    await SecurityStorage.add_webhook(name, {
-        "url": url,
+    await SecurityStorage.add_webhook(body.get("name"), {
+        "url": body.get("url"),
         "secret": raw_secret,
-        "rule": rule,
-        "enabled": enabled
+        "rule": body.get("rule"),
+        "enabled": body.get("enabled", True)
     })
 
     return success_response(request, {
-        "name": name,
-        "url": url,
-        "rule": rule,
-        "enabled": enabled,
+        "name": body.get("name"), "url": body.get("url"),
+        "rule": body.get("rule"), "enabled": body.get("enabled", True),
         "secret": raw_secret,
     })
 
 @router.delete("/webhooks/{name}")
 async def delete_webhook(request: Request, name: str = Path(...), auth=Depends(require_admin)):
     if not await SecurityStorage.delete_webhook(name):
-        raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"Dynamic Webhook '{name}' not found", 404)
+        raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"Dynamic hook missing", 404)
     return success_response(request, {"deleted_webhook": name})
 
 @router.patch("/webhooks/actions")
 async def update_webhook(request: Request, body: dict = Body(...), auth=Depends(require_admin)):
     _require_fields(body, "name")
-    name = body.get("name")
-
+    
     updates = {k: v for k, v in body.items() if k in ["url", "rule", "enabled"]}
-    if not updates:
-        raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "No updatable fields provided", 400)
+    if not updates or not await SecurityStorage.update_webhook(body.get("name"), updates):
+        raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "Update failed", 404)
 
-    if not await SecurityStorage.update_webhook(name, updates):
-        raise NexusGateException(ErrorCodes.INPUT_VALUE_INVALID, f"Dynamic hook '{name}' not found", 404)
-
-    return success_response(request, {"updated_webhook": name, "changes": updates})
+    return success_response(request, {"updated_webhook": body.get("name"), "changes": updates})
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Introspection Views
+# Introspection Subsystem
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/config")
 async def view_config(request: Request, auth=Depends(require_admin)):
-    """Yields live application config state excluding system secrets."""
     data = ConfigManager.get().model_dump()
-
-    for key_name in data.get("api_key", {}):
-        data["api_key"][key_name]["secret"] = "***REDACTED***"
-    for wh_name in data.get("webhook", {}):
-        data["webhook"][wh_name]["secret"] = "***REDACTED***"
-    for db_name in data.get("database", {}):
-        data["database"][db_name]["url"] = "***REDACTED***"
-    for srv_name in data.get("federation", {}).get("server", {}):
-        data["federation"]["server"][srv_name]["api_key"] = "***REDACTED***"
-
+    _redact_sensitive_payloads(data)
     return success_response(request, {"config": data})
 
 @router.get("/rate-limits")
 async def view_rate_limits(request: Request, auth=Depends(require_admin)):
-    """Exports global configuration along with any explicit key overrides."""
     config = ConfigManager.get()
-    overrides = {}
-
-    for name, cfg in config.api_key.items():
-        if cfg.rate_limit_override > 0:
-            overrides[name] = {"rate_limit_override": cfg.rate_limit_override, "source": "config"}
-
-    for name, cfg in SecurityStorage.get_all_keys().items():
-        if cfg["rate_limit_override"] > 0:
-            overrides[name] = {"rate_limit_override": cfg["rate_limit_override"], "source": "sqlite"}
+    
+    overrides = {
+        name: {"rate_limit_override": cfg.rate_limit_override, "source": "config"}
+        for name, cfg in config.api_key.items() if cfg.rate_limit_override > 0
+    }
+    
+    overrides.update({
+        name: {"rate_limit_override": cfg["rate_limit_override"], "source": "sqlite"}
+        for name, cfg in SecurityStorage.get_all_keys().items() if cfg["rate_limit_override"] > 0
+    })
 
     return success_response(request, {
         "global": {

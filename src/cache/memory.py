@@ -9,7 +9,31 @@ from utils.size_parser import parse_size
 
 logger = structlog.get_logger()
 
+# ─────────────────────────────────────────────────────────────────────────────
+# In-Memory Rate Limit Execution Engine
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _resolve_cache_capacity_heuristic(config) -> int:
+    """Estimates safe TTLCache sizing limits derived from string representations of Bytes."""
+    max_memory_bytes = parse_size(config.cache.max_memory)
+    return max(100, max_memory_bytes // 10240)  # Roughly assumes 10KB/object
+
+def _apply_penalty_violation(cache: TTLCache, limits_key: str, penalty_key: str) -> None:
+    """Tracks sequential IP lockouts, generating hard penalties when breached."""
+    violation_tracker_key = f"rl:violations:{limits_key}"
+    violations = cache.get(violation_tracker_key, 0) + 1
+    cache[violation_tracker_key] = violations
+    
+    if violations >= 10:
+        cache[penalty_key] = True
+        logger.warning("Applied IP penalty in memory boundary", key=penalty_key)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Memory Adapter
+# ─────────────────────────────────────────────────────────────────────────────
+
 class MemoryCache:
+    """Ultra-fast LRU/TTL bounded runtime mapping used when Redis/SQLite are absent."""
     _instance = None
     _cache: Optional[TTLCache] = None
     _lock: Optional[asyncio.Lock] = None
@@ -23,12 +47,7 @@ class MemoryCache:
     def get_cache(cls) -> TTLCache:
         if cls._cache is None:
             config = ConfigManager.get()
-            
-            # Simple heuristic for bounded cache
-            # Use maxsize representing item count roughly derived from memory bound
-            # Very basic assumption: 10KB per object on average
-            max_memory_bytes = parse_size(config.cache.max_memory)
-            max_items = max(100, max_memory_bytes // 10240)
+            max_items = _resolve_cache_capacity_heuristic(config)
             
             cls._cache = TTLCache(maxsize=max_items, ttl=config.cache.default_ttl)
             cls._lock = asyncio.Lock()
@@ -44,12 +63,8 @@ class MemoryCache:
             
     @classmethod
     async def set(cls, key: str, value: Any, ttl: Optional[float] = None) -> None:
-        """Sets a value in the cache. Note TTLCache from cachetools doesn't 
-        trivially support per-object TTL natively without subclassing, so we 
-        fallback to default TTL for this simplified memory backend. """
         cache = cls.get_cache()
         async with cls._lock:
-            # For simplicity, memory cache ignores per-item TTL differences
             cache[key] = value
             
     @classmethod
@@ -66,7 +81,7 @@ class MemoryCache:
         cache = cls.get_cache()
         async with cls._lock:
             cache.clear()
-            
+
     @classmethod
     def stats(cls) -> dict:
         cache = cls.get_cache()
@@ -81,39 +96,22 @@ class MemoryCache:
 
     @classmethod
     async def check_rate_limit(cls, limits_key: str, window: int, limit: int, penalty_key: str, burst: int, penalty_cooldown: int) -> tuple[bool, int]:
-        """
-        In-memory sliding window rate limit.
-        Since it's in a single process, the internal lock is sufficient.
-        """
+        """Atomically evaluates sliding limits executing single-thread async locks."""
         now = time.time()
         window_start = now - window
         cache = cls.get_cache()
         
         async with cls._lock:
-            # 1. Check penalty
             if penalty_key in cache:
                 return True, limit + 1
             
-            # 2. Manage history
             history = cache.get(limits_key, [])
             history = [ts for ts in history if ts > window_start]
             
             if len(history) >= limit + burst:
-                # Violation!
-                v_key = f"rl:violations:{limits_key}"
-                violations = cache.get(v_key, 0) + 1
-                cache[v_key] = violations
-                # Note: per-item TTL isn't fully supported in cachetools.TTLCache 
-                # but it uses default_ttl. Good enough for memory-only mode.
-                
-                if violations >= 10:
-                    cache[penalty_key] = True
-                    logger.warning("Applied IP penalty in memory", key=penalty_key)
-                
+                _apply_penalty_violation(cache, limits_key, penalty_key)
                 return True, len(history)
             
-            # 3. Success
             history.append(now)
             cache[limits_key] = history
             return False, len(history)
-
