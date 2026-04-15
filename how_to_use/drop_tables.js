@@ -10,7 +10,7 @@ const path = require('path');
 function loadEnv() {
     const envPath = path.resolve(__dirname, '.env');
     if (!fs.existsSync(envPath)) return {};
-    
+
     return Object.fromEntries(
         fs.readFileSync(envPath, 'utf8')
           .split('\n')
@@ -73,7 +73,7 @@ async function sendRequest(apiPath, method, payload = null) {
 
 function processFinalResponse(res, rawData, resolve, reject) {
     const isSuccess = res.statusCode >= 200 && res.statusCode < 300;
-    
+
     if (!isSuccess) {
         return reject(new Error(`Status ${res.statusCode}: ${rawData}`));
     }
@@ -91,14 +91,14 @@ function processFinalResponse(res, rawData, resolve, reject) {
 
 async function dropSingleTable(tableName) {
     process.stdout.write(`Dropping: ${tableName}... `);
-    await sendRequest(`/api/db/${CONFIG.databaseName}/query`, 'POST', {
+    await sendRequest(`/api/v1/db/${CONFIG.databaseName}/query`, 'POST', {
         sql: `DROP TABLE ${tableName}`
     });
     console.log('✅');
 }
 
 async function fetchAllTables() {
-    const response = await sendRequest(`/api/db/${CONFIG.databaseName}/tables`, 'GET');
+    const response = await sendRequest(`/api/v1/db/${CONFIG.databaseName}/tables`, 'GET');
     return response.data.tables || [];
 }
 

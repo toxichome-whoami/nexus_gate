@@ -102,7 +102,7 @@ async function runDatabaseDiscovery() {
     console.log('🔍 Querying NexusGate for databases...\n');
 
     try {
-        const apiResponse = await fetchFromApi('/api/db/databases');
+        const apiResponse = await fetchFromApi('/api/v1/db/databases');
         displayDatabases(apiResponse.data.databases);
     } catch (error) {
         console.error(`❌ Fetch failed: ${error.message}`);

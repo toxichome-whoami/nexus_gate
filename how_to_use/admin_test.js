@@ -88,44 +88,44 @@ function handleResponse(res, data, resolve, reject) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function testApiKeys() {
-    process.stdout.write("🔑 Testing /api/admin/keys... ");
-    const keysResponse = await performRequest('/api/admin/keys');
+    process.stdout.write("🔑 Testing /api/v1/admin/keys... ");
+    const keysResponse = await performRequest('/api/v1/admin/keys');
     console.log(`✅ Found ${keysResponse.data.keys.length} keys.`);
 }
 
 async function testBans() {
-    process.stdout.write("🚫 Testing /api/admin/bans... ");
-    const bansResponse = await performRequest('/api/admin/bans');
+    process.stdout.write("🚫 Testing /api/v1/admin/bans... ");
+    const bansResponse = await performRequest('/api/v1/admin/bans');
     console.log(`✅ IP Bans: ${bansResponse.data.ip_bans.length}, Key Bans: ${bansResponse.data.key_bans.length}`);
 }
 
 async function testIpBanManagement(ip = "1.2.3.4") {
     process.stdout.write(`🔨 Testing IP Ban (${ip})... `);
-    await performRequest('/api/admin/bans/ip', 'POST', { ip, reason: "Test Ban" });
+    await performRequest('/api/v1/admin/bans/ip', 'POST', { ip, reason: "Test Ban" });
     process.stdout.write("✅ | Unbanning... ");
-    await performRequest(`/api/admin/bans/ip/${ip}`, 'DELETE');
+    await performRequest(`/api/v1/admin/bans/ip/${ip}`, 'DELETE');
     console.log("✅");
 }
 
 async function testKeyBanManagement(keyName = "temporary_test_key") {
     process.stdout.write(`🔑 Testing Key Ban (${keyName})... `);
-    await performRequest('/api/admin/bans/key', 'POST', { key_name: keyName, reason: "Test Key Ban" });
+    await performRequest('/api/v1/admin/bans/key', 'POST', { key_name: keyName, reason: "Test Key Ban" });
     process.stdout.write("✅ | Unbanning... ");
-    await performRequest(`/api/admin/bans/key/${keyName}`, 'DELETE');
+    await performRequest(`/api/v1/admin/bans/key/${keyName}`, 'DELETE');
     console.log("✅");
 }
 
 async function testKeyLifecycle() {
     process.stdout.write("🆕 Testing Key Generation... ");
-    const generationRes = await performRequest('/api/admin/keys', 'POST', { name: "test_gen_key", mode: "readonly" });
+    const generationRes = await performRequest('/api/v1/admin/keys', 'POST', { name: "test_gen_key", mode: "readonly" });
     process.stdout.write(`✅ (${generationRes.data.name}) | Revoking... `);
-    await performRequest(`/api/admin/keys/${generationRes.data.name}`, 'DELETE');
+    await performRequest(`/api/v1/admin/keys/${generationRes.data.name}`, 'DELETE');
     console.log("✅");
 }
 
 async function testCircuitBreakers() {
-    process.stdout.write("⚡ Testing /api/admin/circuit-breakers... ");
-    const cbResponse = await performRequest('/api/admin/circuit-breakers');
+    process.stdout.write("⚡ Testing /api/v1/admin/circuit-breakers... ");
+    const cbResponse = await performRequest('/api/v1/admin/circuit-breakers');
     const circuits = cbResponse.data.circuits;
     console.log(`✅ Active Circuits: ${Object.keys(circuits).length}`);
 
@@ -133,19 +133,19 @@ async function testCircuitBreakers() {
 
     const firstCircuitKey = Object.keys(circuits)[0];
     process.stdout.write(`🔄 Resetting Circuit (${firstCircuitKey})... `);
-    await performRequest(`/api/admin/circuit-breakers/${firstCircuitKey}/reset`, 'POST');
+    await performRequest(`/api/v1/admin/circuit-breakers/${firstCircuitKey}/reset`, 'POST');
     console.log("✅");
 }
 
 async function testServerConfig() {
-    process.stdout.write("📝 Testing /api/admin/config (REDACTED)... ");
-    const configResponse = await performRequest('/api/admin/config');
+    process.stdout.write("📝 Testing /api/v1/admin/config (REDACTED)... ");
+    const configResponse = await performRequest('/api/v1/admin/config');
     console.log(`✅ Server Port: ${configResponse.data.config.server.port}`);
 }
 
 async function testRateLimits() {
-    process.stdout.write("📊 Testing /api/admin/rate-limits... ");
-    const rateLimitResponse = await performRequest('/api/admin/rate-limits');
+    process.stdout.write("📊 Testing /api/v1/admin/rate-limits... ");
+    const rateLimitResponse = await performRequest('/api/v1/admin/rate-limits');
     console.log(`✅ Max Requests: ${rateLimitResponse.data.global.max_requests}`);
 }
 

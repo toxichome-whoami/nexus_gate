@@ -48,7 +48,7 @@ curl -X GET "http://localhost:4500/metrics" \
 
 ### 5. OpenAPI JSON Spec
 ```bash
-curl -X GET "http://localhost:4500/api/spec" \
+curl -X GET "http://localhost:4500/api/v1/api/spec" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -131,7 +131,7 @@ curl -X DELETE "http://localhost:4500/api/v1/db/main_db/users/rows" \
 
 ### 1. List Storages
 ```bash
-curl -X GET "http://localhost:4500/api/fs/storages" \
+curl -X GET "http://localhost:4500/api/v1/fs/storages" \
      -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -158,7 +158,7 @@ curl -X GET "http://localhost:4500/api/v1/fs/local_fs/download?path=/reports_fol
 
 ### 4. Direct Upload (Small Files)
 ```bash
-curl -X POST "http://localhost:4500/api/fs/local_fs/upload" \
+curl -X POST "http://localhost:4500/api/v1/fs/local_fs/upload" \
      -H "Authorization: Bearer <TOKEN>" \
      -F "action=direct" \
      -F "path=/uploads/file.txt" \

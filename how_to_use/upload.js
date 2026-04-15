@@ -16,7 +16,7 @@ const crypto = require('crypto');
 function fetchConfig() {
     const envPath = path.resolve(__dirname, '.env');
     const envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
-    
+
     const env = Object.fromEntries(
         envContent.split('\n')
             .filter(line => line.includes('='))
@@ -44,7 +44,7 @@ const AUTH_TOKEN_B64 = Buffer.from(`${CONFIG.keyName}:${CONFIG.keySecret}`).toSt
 async function apiCall(endpoint, method, payload = null, customHeaders = {}) {
     const url = new URL(`${CONFIG.baseUrl}${endpoint}`);
     const networkClient = url.protocol === 'https:' ? https : http;
-    
+
     const requestOptions = {
         method,
         rejectUnauthorized: false,
@@ -71,9 +71,9 @@ function processApiResponse(res, rawBody, resolve, reject) {
     try {
         const parsed = JSON.parse(rawBody);
         const isOk = res.statusCode >= 200 && res.statusCode < 300;
-        
+
         if (isOk) return resolve(parsed);
-        
+
         const errorDesc = parsed.error ? JSON.stringify(parsed.error) : rawBody;
         reject(new Error(`[${res.statusCode}] ${errorDesc}`));
     } catch (e) {
@@ -88,11 +88,11 @@ function processApiResponse(res, rawBody, resolve, reject) {
 async function discoverStorages() {
     process.stdout.write('📦 Fetching available storages...\n');
     try {
-        const responseData = await apiCall('/api/fs/storages', 'GET');
+        const responseData = await apiCall('/api/v1/fs/storages', 'GET');
         const summary = responseData.data.storages.map(s => ({
-            "Alias": s.name, 
-            "Status": s.status, 
-            "Limit": s.limit 
+            "Alias": s.name,
+            "Status": s.status,
+            "Limit": s.limit
         }));
         console.table(summary);
     } catch (error) {
@@ -101,7 +101,7 @@ async function discoverStorages() {
 }
 
 async function startUploadSession(alias, fileName, remotePath, totalSize) {
-    return apiCall(`/api/fs/${alias}/upload`, 'POST', JSON.stringify({
+    return apiCall(`/api/v1/fs/${alias}/upload`, 'POST', JSON.stringify({
         action: 'initiate',
         filename: fileName,
         path: remotePath,
@@ -113,7 +113,7 @@ async function startUploadSession(alias, fileName, remotePath, totalSize) {
 async function uploadSingleChunk(alias, uploadId, chunkIndex, buffer) {
     const chunkHash = crypto.createHash('sha256').update(buffer).digest('hex');
     const boundary = `----NexusGateBoundary${crypto.randomBytes(8).toString('hex')}`;
-    
+
     const multipartBody = Buffer.concat([
         Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="action"\r\n\r\nchunk\r\n`),
         Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="upload_id"\r\n\r\n${uploadId}\r\n`),
@@ -124,7 +124,7 @@ async function uploadSingleChunk(alias, uploadId, chunkIndex, buffer) {
         Buffer.from(`\r\n--${boundary}--\r\n`)
     ]);
 
-    return apiCall(`/api/fs/${alias}/upload`, 'POST', multipartBody, {
+    return apiCall(`/api/v1/fs/${alias}/upload`, 'POST', multipartBody, {
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
         'Content-Length': multipartBody.length
     });
@@ -146,7 +146,7 @@ async function runChunkedUploadFlow(alias, localFilePath, targetRelativePath) {
     try {
         const initResponse = await startUploadSession(alias, fileName, destination, totalBytes);
         const { upload_id: uploadId, total_chunks: totalChunks, chunks: chunkMetadata } = initResponse.data;
-        
+
         console.log(`✅ Session ID: ${uploadId}`);
 
         const fileDescriptor = fs.openSync(localFilePath, 'r');
@@ -162,11 +162,11 @@ async function runChunkedUploadFlow(alias, localFilePath, targetRelativePath) {
             await uploadSingleChunk(alias, uploadId, i, buffer);
             console.log('✅');
         }
-        
+
         fs.closeSync(fileDescriptor);
 
         process.stdout.write('🏁 Committing merge... ');
-        const finalizeResponse = await apiCall(`/api/fs/${alias}/upload`, 'POST', JSON.stringify({
+        const finalizeResponse = await apiCall(`/api/v1/fs/${alias}/upload`, 'POST', JSON.stringify({
             action: 'finalize',
             upload_id: uploadId
         }), { 'Content-Type': 'application/json' });

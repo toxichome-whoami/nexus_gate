@@ -96,7 +96,7 @@ async function apiPost(endpoint, requestBody = null, method = 'POST') {
 async function ensureMessagingTableExists() {
     process.stdout.write(`🔍 Verifying 'messages' table existence... `);
     try {
-        const tablesResponse = await apiPost(`/api/db/${CONFIG.dbName}/tables`, null, 'GET');
+        const tablesResponse = await apiPost(`/api/v1/db/${CONFIG.dbName}/tables`, null, 'GET');
         const hasMessagesTable = tablesResponse.data.tables.some(t => t.name.toLowerCase() === 'messages');
 
         if (hasMessagesTable) {
@@ -105,7 +105,7 @@ async function ensureMessagingTableExists() {
 
         console.log('❌ Not found.');
         process.stdout.write(`🏗️  Initializing 'messages' structure... `);
-        await apiPost(`/api/db/${CONFIG.dbName}/query`, {
+        await apiPost(`/api/v1/db/${CONFIG.dbName}/query`, {
             sql: `CREATE TABLE IF NOT EXISTS messages (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 content TEXT NOT NULL,
@@ -197,7 +197,7 @@ async function startInteractivePrompt() {
         console.log(command.isNative ? `🛠️  Running primitive SQL...` : `📝 Persistence layer wrapping...`);
 
         try {
-            const result = await apiPost(`/api/db/${CONFIG.dbName}/query`, { sql: command.sql });
+            const result = await apiPost(`/api/v1/db/${CONFIG.dbName}/query`, { sql: command.sql });
             
             if (command.isNative) {
                 console.log(`✅ Success! Affected rows: ${result.data.affected_rows}`);

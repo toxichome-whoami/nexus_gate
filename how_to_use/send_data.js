@@ -17,7 +17,7 @@ const TABLES_TO_SEED = [
 function loadLocalEnv() {
     const envPath = path.resolve(__dirname, '.env');
     if (!fs.existsSync(envPath)) return {};
-    
+
     return Object.fromEntries(
         fs.readFileSync(envPath, 'utf8').split('\n')
           .filter(l => l.includes('='))
@@ -86,8 +86,8 @@ async function ensureTableExists(tableName) {
             tag VARCHAR(255) DEFAULT 'test_item',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )`;
-    
-    return executeRequest(`/api/db/${DB_NAME}/query`, 'POST', { sql: tableStructureSql });
+
+    return executeRequest(`/api/v1/db/${DB_NAME}/query`, 'POST', { sql: tableStructureSql });
 }
 
 /**
@@ -95,10 +95,10 @@ async function ensureTableExists(tableName) {
  */
 async function insertInitialData(tableName) {
     const dummyDataSql = `
-        INSERT INTO ${tableName} (tag) 
+        INSERT INTO ${tableName} (tag)
         VALUES ('${tableName}_seed_data_1'), ('${tableName}_seed_data_2'), ('${tableName}_seed_data_3')`;
-    
-    return executeRequest(`/api/db/${DB_NAME}/query`, 'POST', { sql: dummyDataSql });
+
+    return executeRequest(`/api/v1/db/${DB_NAME}/query`, 'POST', { sql: dummyDataSql });
 }
 
 /**
