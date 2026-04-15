@@ -25,7 +25,7 @@ def _normalize_uri(raw_uri: str) -> str:
 
 def _is_mutation_query(sql: str) -> bool:
     """Determines if the raw payload enforces write locks or mutates schema/data."""
-    return sql.strip().upper().startswith(("INSERT", "UPDATE", "DELETE", "TRUNCATE", "DROP"))
+    return sql.strip().upper().startswith(("INSERT", "UPDATE", "DELETE", "TRUNCATE", "DROP", "CREATE", "ALTER"))
 
 async def _execute_mutation(conn, statement, params: dict) -> QueryResult:
     """Dispatches a mutation and forces an explicit commit."""

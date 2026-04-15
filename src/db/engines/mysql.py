@@ -17,7 +17,7 @@ def _normalize_uri(raw_uri: str) -> str:
 
 def _is_mutation_query(sql: str) -> bool:
     """Identifies explicitly state-altering queries cleanly."""
-    return sql.strip().upper().startswith(("INSERT", "UPDATE", "DELETE", "TRUNCATE", "DROP"))
+    return sql.strip().upper().startswith(("INSERT", "UPDATE", "DELETE", "TRUNCATE", "DROP", "CREATE", "ALTER"))
 
 async def _execute_mutation(conn, statement, params: dict) -> QueryResult:
     """Executes destructive changes mapped with explicitly awaited limits."""
