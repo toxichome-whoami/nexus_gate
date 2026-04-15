@@ -6,209 +6,233 @@ const crypto = require('crypto');
 const readline = require('readline');
 
 /**
- * NEXUSGATE UNIFIED TOOL (Messaging Enhanced)
+ * NEXUSGATE UNIFIED MANAGEMENT TOOL
  * ──────────────────────────────────────────────────────────────────────────
- * 1. Startup Check: Ensures 'messages' table exists in the database.
- * 2. Smart CLI: Auto-detects if you are typing an SQL query OR just a message.
- * 3. Webhook Receiver: Listens for notifications from the NexusGate.
+ * 1. Synchronized Database Provisioning
+ * 2. Real-time Webhook Notification Receiver
+ * 3. Interactive SQL / Message CLI
  */
 
-// --- 🛠️ 1. Configurations ---
-const envPath = path.resolve(__dirname, '.env');
-const env = fs.existsSync(envPath)
-    ? Object.fromEntries(fs.readFileSync(envPath, 'utf8').split('\n').filter(l => l.includes('=')).map(l => l.split('=').map(s => s.trim().replace(/"/g, ''))))
-    : {};
+// ─────────────────────────────────────────────────────────────────────────────
+// 🛠️  1. Environment & Secrets
+// ─────────────────────────────────────────────────────────────────────────────
 
-const CONFIG = {
-    apiKeyName: env.NEXUSGATE_KEY_NAME || "example",
-    apiKeySecret: env.NEXUSGATE_KEY_SECRET || "your_secret_key_here",
-    webhookSecret: env.NEXUSGATE_WEBHOOK_SECRET || "your_webhook_secret_here",
-    baseUrl: env.NEXUSGATE_URL || "http://localhost:4500",
-    dbName: env.NEXUSGATE_DB || "example_db",
-    serverPort: parseInt(env.TOOL_PORT || "3111"),
-    receiverPath: '/api/sync'
-};
+function loadSettings() {
+    const envPath = path.resolve(__dirname, '.env');
+    const rawEnv = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+    
+    const settings = Object.fromEntries(
+        rawEnv.split('\n')
+            .filter(line => line.includes('='))
+            .map(line => {
+                const [k, ...v] = line.split('=');
+                return [k.trim(), v.join('=').trim().replace(/"/g, '')];
+            })
+    );
 
-const authHeader = `Bearer ${Buffer.from(`${CONFIG.apiKeyName}:${CONFIG.apiKeySecret}`).toString('base64')}`;
+    return {
+        apiKeyName: settings.NEXUSGATE_KEY_NAME || "example",
+        apiKeySecret: settings.NEXUSGATE_KEY_SECRET || "your_secret_key_here",
+        webhookSecret: settings.NEXUSGATE_WEBHOOK_SECRET || "your_webhook_secret_here",
+        baseUrl: settings.NEXUSGATE_URL || "http://localhost:4500",
+        dbName: settings.NEXUSGATE_DB || "example_db",
+        localPort: parseInt(settings.TOOL_PORT || "3111"),
+        webhookPath: '/api/sync'
+    };
+}
 
-const rl = readline.createInterface({
+const CONFIG = loadSettings();
+const AUTH_TOKEN = `Bearer ${Buffer.from(`${CONFIG.apiKeyName}:${CONFIG.apiKeySecret}`).toString('base64')}`;
+
+const readlineInterface = readline.createInterface({
     input: process.stdin,
     output: process.stdout
 });
 
 /**
- * 📡 Utility: Send Request to Gateway
+ * Standard communications handler for NexusGate API.
  */
-async function callGateway(path, body = null, method = 'POST') {
-    const url = new URL(`${CONFIG.baseUrl}${path}`);
-    const postData = body ? JSON.stringify(body) : '';
+async function apiPost(endpoint, requestBody = null, method = 'POST') {
+    const targetUrl = new URL(`${CONFIG.baseUrl}${endpoint}`);
+    const payload = requestBody ? JSON.stringify(requestBody) : '';
 
     const options = {
-        method: method,
+        method,
         rejectUnauthorized: false,
         headers: {
-            'Authorization': authHeader,
+            'Authorization': AUTH_TOKEN,
             'Content-Type': 'application/json',
             'X-NexusGate-Webhook-Token': Buffer.from(CONFIG.webhookSecret).toString('base64'),
-            ...(body ? { 'Content-Length': Buffer.byteLength(postData) } : {})
+            ...(requestBody ? { 'Content-Length': Buffer.byteLength(payload) } : {})
         }
     };
 
     return new Promise((resolve, reject) => {
-        const parsedUrl = new URL(CONFIG.baseUrl);
-        const lib = parsedUrl.protocol === 'https:' ? https : http;
-        const req = lib.request(url, options, (res) => {
-            let data = '';
-            res.on('data', chunk => { data += chunk; });
+        const networkModule = targetUrl.protocol === 'https:' ? https : http;
+        const req = networkModule.request(targetUrl, options, (res) => {
+            let dataAccumulator = '';
+            res.on('data', chunk => dataAccumulator += chunk);
             res.on('end', () => {
                 try {
-                    const parsed = JSON.parse(data);
-                    if (res.statusCode >= 200 && res.statusCode < 300) resolve(parsed);
-                    else reject(new Error(parsed.error?.message || `Status ${res.statusCode}`));
+                    const json = JSON.parse(dataAccumulator);
+                    if (res.statusCode >= 200 && res.statusCode < 300) return resolve(json);
+                    reject(new Error(json.error?.message || `API Status ${res.statusCode}`));
                 } catch (e) {
-                    reject(new Error(`Failed to parse response: ${data}`));
+                    reject(new Error(`Non-JSON response received: ${dataAccumulator}`));
                 }
             });
         });
+
         req.on('error', reject);
-        if (body) req.write(postData);
+        if (requestBody) req.write(payload);
         req.end();
     });
 }
 
-/**
- * 🛠️ 2. Startup Database Verification
- */
-async function ensureTablesExist() {
-    process.stdout.write(`🔍 Checking if table 'messages' exists... `);
+// ─────────────────────────────────────────────────────────────────────────────
+// 🛠️  2. Database Provisioning
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function ensureMessagingTableExists() {
+    process.stdout.write(`🔍 Verifying 'messages' table existence... `);
     try {
-        const tablesRes = await callGateway(`/api/db/${CONFIG.dbName}/tables`, null, 'GET');
-        const exists = tablesRes.data.tables.some(t => t.name.toLowerCase() === 'messages');
+        const tablesResponse = await apiPost(`/api/db/${CONFIG.dbName}/tables`, null, 'GET');
+        const hasMessagesTable = tablesResponse.data.tables.some(t => t.name.toLowerCase() === 'messages');
 
-        if (exists) {
-            console.log('✅ Found.');
-        } else {
-            console.log('❌ Missing.');
-            process.stdout.write(`🏗️  Creating table 'messages'... `);
-            await callGateway(`/api/db/${CONFIG.dbName}/query`, {
-                sql: `CREATE TABLE IF NOT EXISTS messages (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    content TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )`
-            });
-            console.log('✅ Created.');
+        if (hasMessagesTable) {
+            return console.log('✅ Present.');
         }
-    } catch (e) {
-        console.log(`⚠️  Warning: ${e.message}`);
-        console.log(`   (Checking permissions or database status)\n`);
-    }
-}
 
-/**
- * 🔒 3. Webhook Signature Verification
- */
-function verifySignature(payload, signature) {
-    if (!CONFIG.webhookSecret) return true;
-    const hmac = crypto.createHmac('sha256', CONFIG.webhookSecret);
-    const digest = hmac.update(payload).digest('hex');
-    return `sha256=${digest}` === signature;
-}
-
-/**
- * 📡 4. The Webhook Receiver Server
- */
-const server = http.createServer((req, res) => {
-    if (req.method === 'POST' && req.url === CONFIG.receiverPath) {
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-        req.on('end', () => {
-            const signature = req.headers['x-nexusgate-signature'];
-            const timestamp = req.headers['x-nexusgate-timestamp'];
-            const isValid = verifySignature(body, signature);
-
-            console.log(`\n\n🔔 [WEBHOOK RECEIVED] Path: ${req.url}`);
-            if (!isValid) {
-                console.log(`❌ [SECURITY] Invalid HMAC Signature! Blocked.`);
-                res.writeHead(401);
-                return res.end();
-            }
-
-            console.log(`✅ [SIGNATURE] Verified via HMAC-SHA256`);
-            try {
-                const data = JSON.parse(body);
-                console.log(`📦 [DATA]`, JSON.stringify(data.data, null, 2));
-            } catch (e) {
-                console.log(`📦 [DATA] Raw Body: ${body}`);
-            }
-
-            process.stdout.write('\n💬 Enter Message or SQL: ');
-            res.writeHead(200);
-            res.end('OK');
+        console.log('❌ Not found.');
+        process.stdout.write(`🏗️  Initializing 'messages' structure... `);
+        await apiPost(`/api/db/${CONFIG.dbName}/query`, {
+            sql: `CREATE TABLE IF NOT EXISTS messages (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )`
         });
-    } else {
-        res.writeHead(404);
-        res.end();
+        console.log('✅ Initialized.');
+    } catch (err) {
+        console.log(`⚠️  Bootstrap Warning: ${err.message}\n`);
     }
-});
+}
 
-/**
- * 💬 5. The Interactive CLI Trigger
- */
-function ask() {
-    rl.question('\n💬 Enter Message or SQL: ', async (input) => {
-        if (!input.trim()) return ask();
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔒 3. Security & Validation
+// ─────────────────────────────────────────────────────────────────────────────
+
+function isSignatureValid(rawPayload, receivedSignature) {
+    if (!CONFIG.webhookSecret) return true;
+    
+    const calculatedHmac = crypto.createHmac('sha256', CONFIG.webhookSecret);
+    const digest = calculatedHmac.update(rawPayload).digest('hex');
+    
+    return `sha256=${digest}` === receivedSignature;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 📡 4. Webhook Networking
+// ─────────────────────────────────────────────────────────────────────────────
+
+function handleIncomingWebhook(req, res) {
+    if (req.method !== 'POST' || req.url !== CONFIG.webhookPath) {
+        res.writeHead(404);
+        return res.end();
+    }
+
+    let payloadBuffer = '';
+    req.on('data', chunk => payloadBuffer += chunk);
+    req.on('end', () => dispatchWebhookData(req, res, payloadBuffer));
+}
+
+function dispatchWebhookData(req, res, rawPayload) {
+    const signature = req.headers['x-nexusgate-signature'];
+    
+    if (!isSignatureValid(rawPayload, signature)) {
+        console.log(`\n❌ [SECURITY ALERT] Blocking invalid HMAC Signature!`);
+        res.writeHead(401);
+        return res.end();
+    }
+
+    console.log(`\n\n🔔 [WEBHOOK] Verified HMAC-SHA256 Payload Received:`);
+    try {
+        const parsed = JSON.parse(rawPayload);
+        console.log(JSON.stringify(parsed.data, null, 2));
+    } catch (e) {
+        console.log(`Raw Content: ${rawPayload}`);
+    }
+
+    process.stdout.write('\n💬 Enter SQL Query or Message: ');
+    res.writeHead(200);
+    res.end('OK');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 💬 5. Interactive UI
+// ─────────────────────────────────────────────────────────────────────────────
+
+function parseCommand(userInput) {
+    const cleanInput = userInput.trim();
+    const isExplicitSql = /^(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|DESCRIBE|SHOW)/i.test(cleanInput);
+
+    if (isExplicitSql) {
+        return { sql: cleanInput, original: cleanInput, isNative: true };
+    }
+
+    // Wrap plain text as a database message
+    const escapedMessage = cleanInput.replace(/'/g, "''");
+    const wrappedSql = `INSERT INTO messages (content) VALUES ('${escapedMessage}')`;
+    
+    return { sql: wrappedSql, original: cleanInput, isNative: false };
+}
+
+async function startInteractivePrompt() {
+    readlineInterface.question('\n💬 Enter SQL Query or Message: ', async (input) => {
+        if (!input.trim()) return startInteractivePrompt();
         if (input.toLowerCase() === 'exit') process.exit(0);
 
-        let sql = input;
-
-        // Auto-detect if it's SQL or JUST a text message
-        const isSQL = /^(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|DESCRIBE|SHOW)/i.test(input.trim());
-
-        if (!isSQL) {
-            // Treat as a direct message and wrap it in an INSERT statement
-            const cleanMessage = input.replace(/'/g, "''"); // Escape single quotes
-            sql = `INSERT INTO messages (content) VALUES ('${cleanMessage}')`;
-            console.log(`📝 Wrapping text as message...`);
-        } else {
-            console.log(`🛠️  Executing raw SQL...`);
-        }
+        const command = parseCommand(input);
+        
+        console.log(command.isNative ? `🛠️  Running primitive SQL...` : `📝 Persistence layer wrapping...`);
 
         try {
-            const result = await callGateway(`/api/db/${CONFIG.dbName}/query`, { sql });
-
-            if (isSQL) {
-               console.log(`✅ SQL Success! Affected rows: ${result.data.affected_rows}`);
-               if (result.data.rows && result.data.rows.length > 0) {
-                   console.table(result.data.rows.slice(0, 5));
-               }
+            const result = await apiPost(`/api/db/${CONFIG.dbName}/query`, { sql: command.sql });
+            
+            if (command.isNative) {
+                console.log(`✅ Success! Affected rows: ${result.data.affected_rows}`);
+                if (result.data.rows?.length > 0) console.table(result.data.rows.slice(0, 5));
             } else {
-               console.log(`🚀 Message sent to database!`);
+                console.log(`🚀 Message committed to memory!`);
             }
-        } catch (e) {
-            console.log(`❌ Gateway Error: ${e.message}`);
+        } catch (err) {
+            console.log(`❌ Communication Failure: ${err.message}`);
         }
-        ask();
+        
+        startInteractivePrompt();
     });
 }
 
-/**
- * 🚀 6. Startup
- */
-(async () => {
+// ─────────────────────────────────────────────────────────────────────────────
+// 🚀 6. Bootstrap
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function bootstrap() {
     console.log("==========================================");
     console.log("🚀 NEXUSGATE UNIFIED MANAGEMENT TOOL");
     console.log("==========================================");
 
-    // 1. Check and Create Table on start
-    await ensureTablesExist();
+    await ensureMessagingTableExists();
 
-    // 2. Start Receiver
-    server.listen(CONFIG.serverPort, '0.0.0.0', () => {
-        console.log(`📡 Receiver Webhook URL: http://localhost:${CONFIG.serverPort}${CONFIG.receiverPath}`);
-        console.log(`🔑 Security: HMAC-SHA256`);
+    const webhookServer = http.createServer(handleIncomingWebhook);
+    
+    webhookServer.listen(CONFIG.localPort, '0.0.0.0', () => {
+        console.log(`📡 Webhook Listener Active: http://localhost:${CONFIG.localPort}${CONFIG.webhookPath}`);
+        console.log(`🔑 Validation Mode: HMAC-SHA256`);
         console.log("------------------------------------------");
-        console.log("Just type a message and hit Enter to save it, or type SQL.\n");
-        ask();
+        console.log("Interface ready. Type a sentence to save it as a message, or raw SQL.\n");
+        startInteractivePrompt();
     });
-})();
+}
+
+bootstrap().catch(err => console.error(`Failed to start: ${err.message}`));

@@ -1,31 +1,41 @@
+"""Integration tests for the database API layer and system health status."""
 import pytest
-
 from server.middleware.auth import get_auth_context
 from utils.types import AuthContext, ServerMode
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Global Infrastructure Tests
+# ─────────────────────────────────────────────────────────────────────────────
 
-def test_health_endpoint(test_client):
+def test_heartbeat_health_check_status(test_client):
+    """Verify that the system health indicator is reachable and reports success."""
     response = test_client.get("/health")
     assert response.status_code == 200
-    data = response.json()
-    assert data["success"] is True
-    assert "status" in data["data"]
+    
+    payload = response.json()
+    assert payload["success"] is True
+    assert "status" in payload["data"]
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Access Control Tests
+# ─────────────────────────────────────────────────────────────────────────────
 
-def test_db_query_requires_auth(test_client):
-    """Sending a query without auth should fail at the auth layer."""
+def test_database_queries_require_mandatory_auth(test_client):
+    """Ensure that the SQL query gateway is protected by basic authentication checks."""
     response = test_client.post(
-        "/api/db/main_db/query",
+        "/api/db/any_database/query",
         json={"sql": "SELECT 1"}
     )
-    assert response.status_code in [401, 403]
+    # Rejection by auth middleware
+    assert response.status_code in (401, 403)
 
-
-def test_db_query_with_mocked_auth(test_client, app_instance):
-    """With mocked auth, dangerous queries should still be blocked or DB not found."""
-    def override_auth():
+def test_database_router_with_elevated_bypass(test_client, app_instance):
+    """Confirm the routing flow when credentials are valid but target resources are transient."""
+    
+    def _inject_root_context():
+        """Provides a bypass context for the authentication handler."""
         return AuthContext(
-            api_key_name="test_admin",
+            api_key_name="test_superuser",
             mode=ServerMode.READWRITE,
             db_scope=["*"],
             fs_scope=["*"],
@@ -33,15 +43,18 @@ def test_db_query_with_mocked_auth(test_client, app_instance):
             full_admin=True,
         )
 
-    app_instance.dependency_overrides[get_auth_context] = override_auth
+    app_instance.dependency_overrides[get_auth_context] = _inject_root_context
 
-    response = test_client.post(
-        "/api/db/main_db/query",
-        json={"sql": "DROP TABLE users"}
-    )
+    try:
+        # Step: Attempt a mutation on a likely missing database
+        # Even if security allows it, the engine should report a failure gracefully
+        response = test_client.post(
+            "/api/db/non_existent_target/query",
+            json={"sql": "DROP TABLE dummy_table"}
+        )
 
-    # DB Engine will fail because main_db doesn't exist in test config,
-    # or security will block the dangerous query
-    assert response.status_code in [400, 403, 404, 500]
-
-    app_instance.dependency_overrides.clear()
+        # Valid failure modes: 
+        # 404 (DB Not Found), 400 (Bad Implementation), 500 (Unhandled Engine Failure)
+        assert response.status_code in (400, 403, 404, 500)
+    finally:
+        app_instance.dependency_overrides.clear()
