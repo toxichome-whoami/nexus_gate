@@ -12,7 +12,7 @@ Architecture:
 import os
 import structlog
 from mcp.server import Server
-from mcp.types import TextContent
+from mcp.types import Tool, TextContent
 
 from config.loader import ConfigManager
 from db.pool import DatabasePoolManager
@@ -39,8 +39,96 @@ DEFAULT_USER_MODE = "readwrite"
 
 def register_all_tools(server: Server) -> None:
     """Attaches all tool handlers to the provided MCP server instance."""
-    _register_database_tools(server)
-    _register_storage_tools(server)
+
+    @server.list_tools()
+    async def handle_list_tools() -> list[Tool]:
+        """Enumerates all tools available to the AI model."""
+        return [
+            Tool(
+                name="list_databases",
+                description="Lists all database aliases configured in this NexusGate instance.",
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            Tool(
+                name="list_tables",
+                description="Lists all tables in a database with their column schemas.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "database": {"type": "string", "description": "The database alias to inspect."}
+                    },
+                    "required": ["database"],
+                },
+            ),
+            Tool(
+                name="describe_table",
+                description="Returns detailed column metadata for a specific table.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "database": {"type": "string", "description": "Database alias."},
+                        "table": {"type": "string", "description": "Table name to describe."}
+                    },
+                    "required": ["database", "table"],
+                },
+            ),
+            Tool(
+                name="query_database",
+                description="Executes a SQL query against a NexusGate-managed database. The query is validated and transpiled before execution.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "database": {"type": "string", "description": "Database alias."},
+                        "sql": {"type": "string", "description": "SQL query to execute."}
+                    },
+                    "required": ["database", "sql"],
+                },
+            ),
+            Tool(
+                name="list_storages",
+                description="Lists all storage aliases configured in this NexusGate instance.",
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            Tool(
+                name="list_files",
+                description="Lists files and directories at the given path in a storage alias.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "storage": {"type": "string", "description": "Storage alias."},
+                        "path": {"type": "string", "description": "Directory path to list (default: '/')."}
+                    },
+                    "required": ["storage"],
+                },
+            ),
+            Tool(
+                name="read_file",
+                description="Reads and returns the text content of a file in a storage alias. Max 1MB.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "storage": {"type": "string", "description": "Storage alias."},
+                        "path": {"type": "string", "description": "Path to the file."}
+                    },
+                    "required": ["storage", "path"],
+                },
+            ),
+        ]
+
+    @server.call_tool()
+    async def handle_call_tool(name: str, arguments: dict | None) -> list[TextContent]:
+        """Dispatches an incoming tool call to the correct handler."""
+        args = arguments or {}
+
+        try:
+            handler = _TOOL_DISPATCH.get(name)
+            if not handler:
+                return [TextContent(type="text", text=f"Unknown tool: {name}")]
+            return await handler(args)
+        except Exception as e:
+            logger.error("MCP tool execution failed", tool=name, error=str(e))
+            return [TextContent(type="text", text=f"Error: {e}")]
+
     logger.debug("MCP tools registered")
 
 
@@ -120,163 +208,155 @@ class ResultFormatter:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Database Tools
+# Tool Handler Implementations
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _register_database_tools(server: Server) -> None:
-    """Registers tools for database introspection and query execution."""
+async def _handle_list_databases(args: dict) -> list[TextContent]:
+    config = ConfigManager.get()
+    aliases = list(config.database.keys())
+    return [TextContent(
+        type="text",
+        text=f"Available databases: {', '.join(aliases) or 'None configured'}",
+    )]
 
-    @server.tool()
-    async def list_databases() -> list[TextContent]:
-        """Lists all database aliases configured in this NexusGate instance."""
-        config = ConfigManager.get()
-        aliases = list(config.database.keys())
 
-        return [TextContent(
-            type="text",
-            text=f"Available databases: {', '.join(aliases) or 'None configured'}",
-        )]
+async def _handle_list_tables(args: dict) -> list[TextContent]:
+    database = args["database"]
+    engine = await DatabaseResolver.get_engine(database)
+    tables = await engine.list_tables()
 
-    @server.tool()
-    async def list_tables(database: str) -> list[TextContent]:
-        """Lists all tables in a database with their column schemas."""
-        engine = await DatabaseResolver.get_engine(database)
-        tables = await engine.list_tables()
+    if not tables:
+        return [TextContent(type="text", text=f"No tables found in '{database}'.")]
 
-        if not tables:
-            return [TextContent(type="text", text=f"No tables found in '{database}'.")]
-
-        schema_lines = []
-        for table in tables:
-            columns = await engine.describe_table(table.name)
-            column_summary = ", ".join(
-                f"{col.name} ({col.type}{'·PK' if col.primary_key else ''})"
-                for col in columns
-            )
-            schema_lines.append(f"• {table.name}: [{column_summary}]")
-
-        return [TextContent(
-            type="text",
-            text=f"Tables in '{database}':\n" + "\n".join(schema_lines),
-        )]
-
-    @server.tool()
-    async def describe_table(database: str, table: str) -> list[TextContent]:
-        """Returns detailed column metadata for a specific table."""
-        engine = await DatabaseResolver.get_engine(database)
-        columns = await engine.describe_table(table)
-
-        if not columns:
-            return [TextContent(type="text", text=f"Table '{table}' not found.")]
-
-        column_lines = [
-            f"• {col.name}: {col.type} "
-            f"{'[PK] ' if col.primary_key else ''}"
-            f"{'[NULL]' if col.nullable else '[NOT NULL]'}"
+    schema_lines = []
+    for table in tables:
+        columns = await engine.describe_table(table.name)
+        column_summary = ", ".join(
+            f"{col.name} ({col.type}{'·PK' if col.primary_key else ''})"
             for col in columns
-        ]
-
-        return [TextContent(
-            type="text",
-            text=f"Schema for '{database}.{table}':\n" + "\n".join(column_lines),
-        )]
-
-    @server.tool()
-    async def query_database(database: str, sql: str) -> list[TextContent]:
-        """
-        Executes a SQL query against a NexusGate-managed database.
-
-        The query passes through:
-        1. AST validation (blocks injection and dangerous operations)
-        2. Dialect transpilation (adapts syntax to the target engine)
-        3. Parameterized execution via the connection pool
-        """
-        engine, db_config = await DatabaseResolver.get_engine_and_config(database)
-
-        # Validate → transpile → execute (same pipeline as REST)
-        safe_sql, operation_type, _target_table = validate_query(
-            sql, db_config, DEFAULT_USER_MODE
         )
-        transpiled_sql = transpile_sql(safe_sql, to_dialect=engine.dialect)
-        result = await engine.execute(transpiled_sql)
+        schema_lines.append(f"• {table.name}: [{column_summary}]")
 
-        # Select-like operations return tabular data; mutations return counts
-        is_read_operation = operation_type in ("select", "show", "describe")
-        if is_read_operation:
-            return [ResultFormatter.format_select(result)]
+    return [TextContent(
+        type="text",
+        text=f"Tables in '{database}':\n" + "\n".join(schema_lines),
+    )]
 
-        return [ResultFormatter.format_mutation(result.affected_rows or 0)]
+
+async def _handle_describe_table(args: dict) -> list[TextContent]:
+    database, table = args["database"], args["table"]
+    engine = await DatabaseResolver.get_engine(database)
+    columns = await engine.describe_table(table)
+
+    if not columns:
+        return [TextContent(type="text", text=f"Table '{table}' not found.")]
+
+    column_lines = [
+        f"• {col.name}: {col.type} "
+        f"{'[PK] ' if col.primary_key else ''}"
+        f"{'[NULL]' if col.nullable else '[NOT NULL]'}"
+        for col in columns
+    ]
+
+    return [TextContent(
+        type="text",
+        text=f"Schema for '{database}.{table}':\n" + "\n".join(column_lines),
+    )]
+
+
+async def _handle_query_database(args: dict) -> list[TextContent]:
+    database, sql = args["database"], args["sql"]
+    engine, db_config = await DatabaseResolver.get_engine_and_config(database)
+
+    # Validate → transpile → execute (same pipeline as REST)
+    safe_sql, operation_type, _target_table = validate_query(
+        sql, db_config, DEFAULT_USER_MODE
+    )
+    transpiled_sql = transpile_sql(safe_sql, to_dialect=engine.dialect)
+    result = await engine.execute(transpiled_sql)
+
+    # Select-like operations return tabular data; mutations return counts
+    is_read_operation = operation_type in ("select", "show", "describe")
+    if is_read_operation:
+        return [ResultFormatter.format_select(result)]
+
+    return [ResultFormatter.format_mutation(result.affected_rows or 0)]
+
+
+async def _handle_list_storages(args: dict) -> list[TextContent]:
+    config = ConfigManager.get()
+    aliases = list(config.storage.keys())
+    return [TextContent(
+        type="text",
+        text=f"Available storages: {', '.join(aliases) or 'None configured'}",
+    )]
+
+
+async def _handle_list_files(args: dict) -> list[TextContent]:
+    storage = args["storage"]
+    path = args.get("path", "/")
+    config = ConfigManager.get()
+    storage_config = config.storage.get(storage)
+
+    if not storage_config:
+        return [TextContent(type="text", text=f"Storage '{storage}' not found.")]
+
+    target_directory = os.path.join(storage_config.path, path.lstrip("/"))
+
+    if not os.path.isdir(target_directory):
+        return [TextContent(type="text", text=f"Path '{path}' is not a directory.")]
+
+    raw_entries = os.listdir(target_directory)
+    entry_lines = _format_directory_entries(target_directory, raw_entries)
+
+    return [TextContent(
+        type="text",
+        text=f"Contents of '{storage}:{path}':\n" + "\n".join(entry_lines),
+    )]
+
+
+async def _handle_read_file(args: dict) -> list[TextContent]:
+    storage = args["storage"]
+    path = args["path"]
+    config = ConfigManager.get()
+    storage_config = config.storage.get(storage)
+
+    if not storage_config:
+        return [TextContent(type="text", text=f"Storage '{storage}' not found.")]
+
+    file_path = os.path.join(storage_config.path, path.lstrip("/"))
+
+    if not os.path.isfile(file_path):
+        return [TextContent(type="text", text=f"File '{path}' does not exist.")]
+
+    file_size = os.path.getsize(file_path)
+    if file_size > 1_048_576:  # 1MB cap
+        return [TextContent(
+            type="text",
+            text=f"File '{path}' is too large to read ({file_size:,} bytes). Max: 1MB.",
+        )]
+
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="replace") as handle:
+            content = handle.read()
+        return [TextContent(type="text", text=content)]
+    except Exception as read_error:
+        return [TextContent(type="text", text=f"Error reading file: {read_error}")]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Storage Tools
+# Tool Dispatch Table
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _register_storage_tools(server: Server) -> None:
-    """Registers tools for file system introspection."""
-
-    @server.tool()
-    async def list_storages() -> list[TextContent]:
-        """Lists all storage aliases configured in this NexusGate instance."""
-        config = ConfigManager.get()
-        aliases = list(config.storage.keys())
-
-        return [TextContent(
-            type="text",
-            text=f"Available storages: {', '.join(aliases) or 'None configured'}",
-        )]
-
-    @server.tool()
-    async def list_files(storage: str, path: str = "/") -> list[TextContent]:
-        """Lists files and directories at the given path in a storage alias."""
-        config = ConfigManager.get()
-        storage_config = config.storage.get(storage)
-
-        if not storage_config:
-            return [TextContent(type="text", text=f"Storage '{storage}' not found.")]
-
-        target_directory = os.path.join(storage_config.path, path.lstrip("/"))
-
-        if not os.path.isdir(target_directory):
-            return [TextContent(type="text", text=f"Path '{path}' is not a directory.")]
-
-        # Read entries and format with type icons
-        raw_entries = os.listdir(target_directory)
-        entry_lines = _format_directory_entries(target_directory, raw_entries)
-
-        return [TextContent(
-            type="text",
-            text=f"Contents of '{storage}:{path}':\n" + "\n".join(entry_lines),
-        )]
-
-    @server.tool()
-    async def read_file(storage: str, path: str) -> list[TextContent]:
-        """Reads and returns the text content of a file in a storage alias."""
-        config = ConfigManager.get()
-        storage_config = config.storage.get(storage)
-
-        if not storage_config:
-            return [TextContent(type="text", text=f"Storage '{storage}' not found.")]
-
-        file_path = os.path.join(storage_config.path, path.lstrip("/"))
-
-        if not os.path.isfile(file_path):
-            return [TextContent(type="text", text=f"File '{path}' does not exist.")]
-
-        # Guard against reading large binary files into the context window
-        file_size = os.path.getsize(file_path)
-        if file_size > 1_048_576:  # 1MB cap
-            return [TextContent(
-                type="text",
-                text=f"File '{path}' is too large to read ({file_size:,} bytes). Max: 1MB.",
-            )]
-
-        try:
-            with open(file_path, "r", encoding="utf-8", errors="replace") as handle:
-                content = handle.read()
-            return [TextContent(type="text", text=content)]
-        except Exception as read_error:
-            return [TextContent(type="text", text=f"Error reading file: {read_error}")]
+_TOOL_DISPATCH = {
+    "list_databases": _handle_list_databases,
+    "list_tables": _handle_list_tables,
+    "describe_table": _handle_describe_table,
+    "query_database": _handle_query_database,
+    "list_storages": _handle_list_storages,
+    "list_files": _handle_list_files,
+    "read_file": _handle_read_file,
+}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
