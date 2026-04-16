@@ -148,21 +148,8 @@ async def get_auth_context(
     if request.headers.get("X-Federation-Secret") and request.headers.get("X-Federation-Node"):
         return _get_federation_context(request, config)
 
-    # 2. Extract standard API tokens (Header or URL Query for Connectors)
-    if credentials:
-        key_name, secret = _parse_bearer_token(credentials)
-    else:
-        # Claude Web Connectors and other SSE clients often can't send headers easily.
-        # We allow passing the Base64 token via the ?token= query parameter.
-        token = request.query_params.get("token")
-        if not token:
-            raise NexusGateException(ErrorCodes.AUTH_INVALID_FORMAT, "Missing authentication header or ?token= param.", 401)
-        
-        try:
-            decoded_token = base64.b64decode(token).decode("utf-8")
-            key_name, secret = decoded_token.split(":", 1)
-        except Exception:
-            raise NexusGateException(ErrorCodes.AUTH_INVALID_FORMAT, "Invalid Base64 token format in query string.", 401)
+    # 2. Extract standard API tokens
+    key_name, secret = _parse_bearer_token(credentials)
 
     # 3. Apply IP/Key global firewall blocklists
     _evaluate_network_bans(request, key_name)
