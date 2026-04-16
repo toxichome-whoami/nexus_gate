@@ -47,28 +47,29 @@ class ASGIPassThroughResponse(Response):
 
 def _authenticate_from_request(request: Request) -> None:
     """
-    Extracts the Bearer token from the request, validates it against
-    the same credential stores used by the REST API, and pushes the
-    resulting AuthContext into the session-scoped context variable.
-
-    Raises JSONResponse-wrapped errors on failure so the caller can
-    return them directly without establishing an SSE session.
+    Extracts the token from either the 'Authorization' header or the 'token'
+    query parameter, then validates it against the credential stores.
     """
     auth_header = request.headers.get("authorization", "")
-    if not auth_header:
-        raise _auth_error("Missing Authorization header.", 401)
+    token = ""
 
-    # Strip "Bearer " prefix and wrap into the expected credential object
-    scheme, _, token = auth_header.partition(" ")
-    if scheme.lower() != "bearer" or not token:
-        raise _auth_error("Invalid Authorization scheme. Expected 'Bearer <token>'.", 401)
+    if auth_header:
+        # Extract from Header: "Bearer <token>"
+        scheme, _, token = auth_header.partition(" ")
+        if scheme.lower() != "bearer" or not token:
+             raise _auth_error("Invalid Authorization scheme. Expected 'Bearer <token>'.", 401)
+    else:
+        # Fallback to Query Param: "?token=..."
+        token = request.query_params.get("token", "")
+        if not token:
+            raise _auth_error("Missing Authorization header or token query parameter.", 401)
 
-    credentials = HTTPAuthorizationCredentials(scheme=scheme, credentials=token)
+    credentials = HTTPAuthorizationCredentials(scheme="bearer", credentials=token)
 
     try:
         key_name, secret = _parse_bearer_token(credentials)
     except Exception:
-        raise _auth_error("Malformed Bearer token. Expected Base64(key_name:secret).", 401)
+        raise _auth_error("Malformed token. Expected Base64(key_name:secret).", 401)
 
     config = ConfigManager.get()
 
