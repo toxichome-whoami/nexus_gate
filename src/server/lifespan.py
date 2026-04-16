@@ -74,5 +74,10 @@ async def lifespan(app: FastAPI):
     logger.info("Initiating NexusGate shutdown sequence")
     await _stop_background_daemons(active_daemons)
     await DatabasePoolManager.shutdown()
+
+    # Release MCP server instance if it was active
+    if config.features.mcp:
+        from api.mcp.server import MCPServerManager
+        MCPServerManager.shutdown()
     
     logger.info("Shutdown sequence fully completed")

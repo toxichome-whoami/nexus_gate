@@ -26,6 +26,12 @@ webhook = true
 federation = false
 metrics = true
 playground = false            # Enable /api/docs Swagger UI
+mcp = false                   # Enable MCP (Model Context Protocol) server
+
+# ─── MCP (Model Context Protocol) ────────────
+[mcp]
+server_name = "nexusgate"     # Identifier shown to MCP clients
+server_version = "1.0.0"
 
 # ─── Logging ──────────────────────────────────
 [logging]

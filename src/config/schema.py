@@ -31,6 +31,7 @@ class FeaturesConfig(BaseModel):
     federation: bool = False
     metrics: bool = True
     playground: bool = False
+    mcp: bool = False                 # Enable MCP (Model Context Protocol) server
 
 class LoggingConfig(BaseModel):
     """Formats payload retention policies targeting physical disk operations."""
@@ -159,10 +160,24 @@ class CircuitBreakerConfig(BaseModel):
     success_threshold: int = 3
     timeout: int = 30
 
+<<<<<<< Updated upstream
+=======
+<<<<<<< Updated upstream
+=======
+class MCPConfig(BaseModel):
+    """Controls the MCP (Model Context Protocol) server identity."""
+    server_name: str = "nexusgate"
+    server_version: str = "1.0.0"
+
+>>>>>>> Stashed changes
 # ─────────────────────────────────────────────────────────────────────────────
 # Master Node Payload
 # ─────────────────────────────────────────────────────────────────────────────
 
+<<<<<<< Updated upstream
+=======
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
 class NexusGateConfig(BaseModel):
     """The absolute Master Layout tracking all active operational parameters per-boot."""
     server: ServerConfig = Field(default_factory=ServerConfig)
@@ -177,3 +192,4 @@ class NexusGateConfig(BaseModel):
     api_key: Dict[str, ApiKeyDefConfig] = Field(default_factory=dict)
     federation: FederationConfig = Field(default_factory=FederationConfig)
     circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)
+    mcp: MCPConfig = Field(default_factory=MCPConfig)
