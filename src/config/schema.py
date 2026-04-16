@@ -160,24 +160,15 @@ class CircuitBreakerConfig(BaseModel):
     success_threshold: int = 3
     timeout: int = 30
 
-<<<<<<< Updated upstream
-=======
-<<<<<<< Updated upstream
-=======
 class MCPConfig(BaseModel):
     """Controls the MCP (Model Context Protocol) server identity."""
     server_name: str = "nexusgate"
     server_version: str = "1.0.0"
 
->>>>>>> Stashed changes
 # ─────────────────────────────────────────────────────────────────────────────
 # Master Node Payload
 # ─────────────────────────────────────────────────────────────────────────────
 
-<<<<<<< Updated upstream
-=======
->>>>>>> Stashed changes
->>>>>>> Stashed changes
 class NexusGateConfig(BaseModel):
     """The absolute Master Layout tracking all active operational parameters per-boot."""
     server: ServerConfig = Field(default_factory=ServerConfig)
