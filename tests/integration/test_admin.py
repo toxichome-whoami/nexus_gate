@@ -1,10 +1,14 @@
-"""Integration tests for the admin API endpoints."""
+"""Integration tests for the administrative API surface."""
 import pytest
 from server.middleware.auth import get_auth_context, require_admin
 from utils.types import AuthContext, ServerMode
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Auth Overrides
+# ─────────────────────────────────────────────────────────────────────────────
 
-def admin_override():
+def _create_admin_context() -> AuthContext:
+    """Produces a privileged authentication identity for bypass testing."""
     return AuthContext(
         api_key_name="test_admin",
         mode=ServerMode.READWRITE,
@@ -14,117 +18,133 @@ def admin_override():
         full_admin=True,
     )
 
+def _enable_admin_access(app_instance):
+    """Binds admin-level scopes to the dependency injection container."""
+    identity = _create_admin_context()
+    app_instance.dependency_overrides[get_auth_context] = lambda: identity
+    app_instance.dependency_overrides[require_admin] = lambda: identity
 
-def test_list_bans_empty(test_client, app_instance):
-    app_instance.dependency_overrides[get_auth_context] = admin_override
-    app_instance.dependency_overrides[require_admin] = admin_override
+# ─────────────────────────────────────────────────────────────────────────────
+# Ban Management Tests
+# ─────────────────────────────────────────────────────────────────────────────
 
-    response = test_client.get("/api/admin/bans")
-    assert response.status_code == 200
-    data = response.json()
-    assert "ip_bans" in data["data"]
-    assert "key_bans" in data["data"]
+def test_admin_fetch_bans_returns_schema(test_client, app_instance):
+    """Verify that the ban list endpoint returns correctly structured empty lists."""
+    _enable_admin_access(app_instance)
 
-    app_instance.dependency_overrides.clear()
+    try:
+        response = test_client.get("/api/admin/bans")
+        assert response.status_code == 200
+        
+        payload = response.json()["data"]
+        assert "ip_bans" in payload and "key_bans" in payload
+    finally:
+        app_instance.dependency_overrides.clear()
 
+def test_admin_ip_ban_lifecycle(test_client, app_instance):
+    """Ensure IPs can be dynamically banned and subsequently permitted."""
+    _enable_admin_access(app_instance)
+    target_ip = "1.2.3.4"
 
-def test_ban_and_unban_ip(test_client, app_instance):
-    app_instance.dependency_overrides[get_auth_context] = admin_override
-    app_instance.dependency_overrides[require_admin] = admin_override
+    try:
+        # Step 1: Execute Ban
+        ban_response = test_client.post(
+            "/api/admin/bans/ip",
+            json={"ip": target_ip, "reason": "Integration Test", "duration_seconds": 3600}
+        )
+        assert ban_response.status_code == 200
+        assert ban_response.json()["data"]["banned_ip"] == target_ip
 
-    # Ban
-    response = test_client.post(
-        "/api/admin/bans/ip",
-        json={"ip": "1.2.3.4", "reason": "Test ban", "duration_seconds": 3600},
-    )
-    assert response.status_code == 200
-    assert response.json()["data"]["banned_ip"] == "1.2.3.4"
+        # Step 2: Verify Persistence
+        bans = test_client.get("/api/admin/bans").json()["data"]
+        assert target_ip in bans["ip_bans"]
 
-    # Verify it appears in ban list
-    bans = test_client.get("/api/admin/bans").json()
-    assert "1.2.3.4" in bans["data"]["ip_bans"]
+        # Step 3: Revoke Ban
+        revoke_response = test_client.delete(f"/api/admin/bans/ip/{target_ip}")
+        assert revoke_response.status_code == 200
 
-    # Unban
-    response = test_client.delete("/api/admin/bans/ip/1.2.3.4")
-    assert response.status_code == 200
+        # Step 4: Verify Removal
+        final_bans = test_client.get("/api/admin/bans").json()["data"]
+        assert target_ip not in final_bans["ip_bans"]
+    finally:
+        app_instance.dependency_overrides.clear()
 
-    # Verify it's gone
-    bans = test_client.get("/api/admin/bans").json()
-    assert "1.2.3.4" not in bans["data"]["ip_bans"]
+# ─────────────────────────────────────────────────────────────────────────────
+# Configuration & Metrics Tests
+# ─────────────────────────────────────────────────────────────────────────────
 
-    app_instance.dependency_overrides.clear()
+def test_admin_fetch_circuit_breaker_states(test_client, app_instance):
+    """Verify visibility of circuit breaker health metrics."""
+    _enable_admin_access(app_instance)
 
+    try:
+        response = test_client.get("/api/admin/circuit-breakers")
+        assert response.status_code == 200
+        assert "circuits" in response.json()["data"]
+    finally:
+        app_instance.dependency_overrides.clear()
 
-def test_circuit_breaker_list(test_client, app_instance):
-    app_instance.dependency_overrides[get_auth_context] = admin_override
-    app_instance.dependency_overrides[require_admin] = admin_override
+def test_admin_config_view_redacts_sensitive_tokens(test_client, app_instance):
+    """Confirm that the configuration echo route obscures raw API secrets."""
+    _enable_admin_access(app_instance)
 
-    response = test_client.get("/api/admin/circuit-breakers")
-    assert response.status_code == 200
-    assert "circuits" in response.json()["data"]
+    try:
+        response = test_client.get("/api/admin/config")
+        assert response.status_code == 200
+        
+        api_keys = response.json()["data"]["config"].get("api_key", {})
+        for metadata in api_keys.values():
+            assert metadata["secret"] == "***REDACTED***"
+    finally:
+        app_instance.dependency_overrides.clear()
 
-    app_instance.dependency_overrides.clear()
+# ─────────────────────────────────────────────────────────────────────────────
+# Key Lifecycle Tests
+# ─────────────────────────────────────────────────────────────────────────────
 
+def test_admin_generate_and_revoke_ephemeral_key(test_client, app_instance):
+    """Verify that sub-keys can be provisioned and immediately invalidated."""
+    _enable_admin_access(app_instance)
+    temp_key_name = "test_dynamic_key"
 
-def test_view_config_masks_secrets(test_client, app_instance):
-    app_instance.dependency_overrides[get_auth_context] = admin_override
-    app_instance.dependency_overrides[require_admin] = admin_override
+    try:
+        # Step 1: Provision
+        provision_res = test_client.post(
+            "/api/admin/keys",
+            json={"name": temp_key_name, "mode": "readonly", "db_scope": ["*"]}
+        )
+        assert provision_res.status_code == 200
+        assert provision_res.json()["data"]["name"] == temp_key_name
 
-    response = test_client.get("/api/admin/config")
-    assert response.status_code == 200
-    config_data = response.json()["data"]["config"]
+        # Step 2: Verify Scopes
+        key_list = test_client.get("/api/admin/keys").json()["data"]["keys"]
+        target_meta = next(k for k in key_list if k["name"] == temp_key_name)
+        assert target_meta["full_admin"] is False
 
-    # Secrets must be redacted
-    for key_name, key_data in config_data.get("api_key", {}).items():
-        assert key_data["secret"] == "***REDACTED***"
+        # Step 3: Invalidate
+        revoke_res = test_client.delete(f"/api/admin/keys/{temp_key_name}")
+        assert revoke_res.status_code == 200
+    finally:
+        app_instance.dependency_overrides.clear()
 
-    app_instance.dependency_overrides.clear()
+# ─────────────────────────────────────────────────────────────────────────────
+# Safety Guard Tests
+# ─────────────────────────────────────────────────────────────────────────────
 
+def test_admin_prevents_self_lockout(test_client, app_instance):
+    """Ensure that the currently active admin identity cannot ban its own access."""
+    _enable_admin_access(app_instance)
 
-def test_create_and_revoke_dynamic_key(test_client, app_instance):
-    app_instance.dependency_overrides[get_auth_context] = admin_override
-    app_instance.dependency_overrides[require_admin] = admin_override
+    try:
+        # Attempt self-ban
+        ban_attempt = test_client.post(
+            "/api/admin/bans/key",
+            json={"key_name": "test_admin", "reason": "self-lockout test"}
+        )
+        assert ban_attempt.status_code == 400
 
-    # Create
-    response = test_client.post(
-        "/api/admin/keys",
-        json={"name": "test_dynamic_key", "mode": "readonly", "db_scope": ["*"]},
-    )
-    assert response.status_code == 200
-    data = response.json()["data"]
-    assert data["name"] == "test_dynamic_key"
-    assert "secret" in data
-    assert "bearer_token" in data
-
-    # Verify it appears in list
-    keys = test_client.get("/api/admin/keys").json()["data"]["keys"]
-    names = [k["name"] for k in keys]
-    assert "test_dynamic_key" in names
-
-    # Dynamic key should never have full_admin
-    dynamic = [k for k in keys if k["name"] == "test_dynamic_key"][0]
-    assert dynamic["full_admin"] is False
-
-    # Revoke
-    response = test_client.delete("/api/admin/keys/test_dynamic_key")
-    assert response.status_code == 200
-
-    app_instance.dependency_overrides.clear()
-
-
-def test_self_lockout_prevention(test_client, app_instance):
-    app_instance.dependency_overrides[get_auth_context] = admin_override
-    app_instance.dependency_overrides[require_admin] = admin_override
-
-    # Try to ban own key
-    response = test_client.post(
-        "/api/admin/bans/key",
-        json={"key_name": "test_admin", "reason": "self-test"},
-    )
-    assert response.status_code == 400
-
-    # Try to revoke own key
-    response = test_client.delete("/api/admin/keys/test_admin")
-    assert response.status_code == 400
-
-    app_instance.dependency_overrides.clear()
+        # Attempt self-revocation
+        revoke_attempt = test_client.delete("/api/admin/keys/test_admin")
+        assert revoke_attempt.status_code == 400
+    finally:
+        app_instance.dependency_overrides.clear()

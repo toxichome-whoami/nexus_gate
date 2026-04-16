@@ -7,29 +7,28 @@ class RequestIDMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
+    def _resolve_request_id(self, headers: dict) -> str:
+        """Extracts existing tracing ID or generates a new chronological UUIDv7."""
+        req_id_bytes = headers.get(b"x-request-id", b"")
+        if req_id_bytes:
+            return req_id_bytes.decode("ascii")
+        return f"req_{uuid7().hex}"
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
 
         headers = dict(scope.get("headers", []))
+        req_id = self._resolve_request_id(headers)
 
-        # Try to find existing X-Request-ID
-        req_id = headers.get(b"x-request-id", b"").decode("ascii")
-        if not req_id:
-            # Generate a new UUIDv7 string. Prefix as req_xxx
-            req_id = f"req_{uuid7().hex}"
-
-            # Note: We don't mutate scope['headers'] directly as it could break some
-            # downstream tools expecting unmodified headers, but we could if needed.
-            # Instead we attach it to state if using starlette requests. Since we are pure ASGI here:
-            scope.setdefault("state", {})["request_id"] = req_id
+        # Attach securely for downstream processors (logging)
+        scope.setdefault("state", {})["request_id"] = req_id
 
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
                 resp_headers = message.setdefault("headers", [])
-
-                # Ensure it's in the response
                 existing_keys = {k for k, v in resp_headers}
+                
                 if b"x-request-id" not in existing_keys:
                     resp_headers.append((b"x-request-id", req_id.encode("ascii")))
 

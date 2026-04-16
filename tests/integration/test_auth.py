@@ -1,33 +1,44 @@
-"""Integration tests for the authentication middleware and endpoints."""
-import pytest
+"""Integration tests for the authentication and authorization enforcement layers."""
 import base64
-
+import pytest
 from server.middleware.auth import get_auth_context
 from utils.types import AuthContext, ServerMode
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Credentials Generation
+# ─────────────────────────────────────────────────────────────────────────────
 
-def encode_key(name: str, secret: str) -> str:
-    return base64.b64encode(f"{name}:{secret}".encode()).decode()
+def _generate_bearer_header(key_name: str, key_secret: str) -> dict:
+    """Produces a standard Authorization header dictionary."""
+    raw_payload = f"{key_name}:{key_secret}"
+    b64_token = base64.b64encode(raw_payload.encode()).decode()
+    return {"Authorization": f"Bearer {b64_token}"}
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Endpoint Protection Tests
+# ─────────────────────────────────────────────────────────────────────────────
 
-def test_auth_integration_invalid_key(test_client):
-    token = encode_key("invalid_user", "some_secret_padded_to_32chars_here!")
-    response = test_client.get(
-        "/api/db/databases",
-        headers={"Authorization": f"Bearer {token}"}
-    )
+def test_gateway_rejects_unmapped_api_keys(test_client):
+    """Ensure that unknown or fictitious credentials result in immediate rejection."""
+    headers = _generate_bearer_header("ghost_user", "padded_secret_to_32chars_required")
+    response = test_client.get("/api/db/databases", headers=headers)
+    
     assert response.status_code == 401
 
-
-def test_auth_integration_missing_header(test_client):
+def test_gateway_rejects_missing_authorization(test_client):
+    """Confirm that the middleware fails closed when no headers are provided."""
     response = test_client.get("/api/db/databases")
-    assert response.status_code == 403  # HTTPBearer gives 403 on missing
+    
+    # HTTPBearer returns 403 Forbidden for missing Bearer headers
+    assert response.status_code == 403
 
-
-def test_auth_integration_admin_route_blocked_for_normal(test_client, app_instance):
-    def override_auth_normal():
+def test_gateway_enforces_admin_scope_for_protected_routes(test_client, app_instance):
+    """Verify that a legitimate non-admin key is blocked from administrative modules."""
+    
+    def _create_readonly_normal_context():
+        """Creates an identity without administrative privileges."""
         return AuthContext(
-            api_key_name="normal_user",
+            api_key_name="standard_readonly_user",
             mode=ServerMode.READONLY,
             db_scope=["*"],
             fs_scope=["*"],
@@ -35,10 +46,11 @@ def test_auth_integration_admin_route_blocked_for_normal(test_client, app_instan
             full_admin=False,
         )
 
-    app_instance.dependency_overrides[get_auth_context] = override_auth_normal
+    app_instance.dependency_overrides[get_auth_context] = _create_readonly_normal_context
 
-    response = test_client.get("/api/admin/keys")
-    # require_admin should block this
-    assert response.status_code == 403
-
-    app_instance.dependency_overrides.clear()
+    try:
+        # Routes under /api/admin/ require 'full_admin=True'
+        response = test_client.get("/api/admin/keys")
+        assert response.status_code == 403
+    finally:
+        app_instance.dependency_overrides.clear()

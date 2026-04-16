@@ -5,22 +5,59 @@ from sqlalchemy import text
 from db.engines.base import DatabaseEngine, TableInfo, ColumnInfo, QueryResult
 from config.schema import DatabaseDefConfig
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Helper Functions
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _normalize_uri(raw_uri: str) -> str:
+    """Pre-configures URIs to inject exactly the correct asynchronous wrapper driver."""
+    if raw_uri.startswith("mysql://"):
+        return raw_uri.replace("mysql://", "mysql+aiomysql://")
+    return raw_uri
+
+def _is_mutation_query(sql: str) -> bool:
+    """Identifies explicitly state-altering queries cleanly."""
+    return sql.strip().upper().startswith(("INSERT", "UPDATE", "DELETE", "TRUNCATE", "DROP", "CREATE", "ALTER"))
+
+async def _execute_mutation(conn, statement, params: dict) -> QueryResult:
+    """Executes destructive changes mapped with explicitly awaited limits."""
+    result = await conn.execute(statement, params)
+    await conn.commit()
+    return QueryResult(affected_rows=result.rowcount)
+
+async def _execute_read(conn, statement, params: dict) -> QueryResult:
+    """Pulls complex read layouts gracefully bypassing empty mappings safely."""
+    result = await conn.execute(statement, params)
+    rows = [dict(row._mapping) for row in result] if result.returns_rows else []
+    columns = list(result.keys()) if result.keys() else []
+    
+    if not result.returns_rows:
+        await conn.commit()
+        
+    return QueryResult(columns=columns, rows=rows, affected_rows=result.rowcount)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Core Driver Protocol Implementation
+# ─────────────────────────────────────────────────────────────────────────────
+
 class MySQLEngine(DatabaseEngine):
+    """Provides ultra-fast async-first hooks traversing MySQL distributions."""
+    
     def __init__(self, config: DatabaseDefConfig):
-        uri = config.url
-        if uri.startswith("mysql://"):
-            uri = uri.replace("mysql://", "mysql+aiomysql://")
+        standardized_uri = _normalize_uri(config.url)
+        overflow_buffer = max(0, config.pool_max - config.pool_min)
 
         self.engine: AsyncEngine = create_async_engine(
-            uri,
+            standardized_uri,
             pool_size=config.pool_min,
-            max_overflow=config.pool_max - config.pool_min if config.pool_max > config.pool_min else 0,
+            max_overflow=overflow_buffer,
             pool_timeout=config.connection_timeout,
             pool_recycle=config.max_lifetime,
             pool_pre_ping=True
         )
 
     async def connect(self) -> None:
+        """Handled entirely natively by declarative connection strategies."""
         pass
 
     async def disconnect(self) -> None:
@@ -38,44 +75,30 @@ class MySQLEngine(DatabaseEngine):
         sql = "SHOW TABLES;"
         async with self.engine.connect() as conn:
             result = await conn.execute(text(sql))
-            tables = []
-            for row in result:
-                tables.append(TableInfo(name=row[0], row_count_estimate=0))
-            return tables
+            return [TableInfo(name=row[0], row_count_estimate=0) for row in result]
 
     async def describe_table(self, table: str) -> List[ColumnInfo]:
-        sql = f"DESCRIBE {table};" # Params can't be used for table names usually in raw text
+        """Maps declarative descriptions targeting explicit table structural limits."""
+        sql = f"DESCRIBE {table};" 
         async with self.engine.connect() as conn:
             result = await conn.execute(text(sql))
-            columns = []
-            for row in result:
-                # row: Field, Type, Null, Key, Default, Extra
-                columns.append(ColumnInfo(
+            return [
+                ColumnInfo(
                     name=row[0],
                     type=row[1],
                     nullable=(row[2] == 'YES'),
                     primary_key=(row[3] == 'PRI')
-                ))
-            return columns
+                ) for row in result
+            ]
 
     async def execute(self, sql: str, params: Optional[Dict[str, Any]] = None) -> QueryResult:
+        query_params = params or {}
+        statement = text(sql)
+        
         async with self.engine.connect() as conn:
-            if params is None:
-                params = {}
-            if sql.strip().upper().startswith(("INSERT", "UPDATE", "DELETE")):
-                result = await conn.execute(text(sql), params)
-                await conn.commit()
-                return QueryResult(affected_rows=result.rowcount)
-            else:
-                result = await conn.execute(text(sql), params)
-                rows = []
-                columns = []
-                if result.returns_rows:
-                    rows = [dict(row._mapping) for row in result]
-                    columns = list(result.keys()) if result.keys() else []
-                if not result.returns_rows:
-                    await conn.commit()
-                return QueryResult(columns=columns, rows=rows, affected_rows=result.rowcount)
+            if _is_mutation_query(sql):
+                return await _execute_mutation(conn, statement, query_params)
+            return await _execute_read(conn, statement, query_params)
 
     @property
     def dialect(self) -> str:

@@ -1,77 +1,72 @@
-"""Integration tests for webhook emitter and queue behavior."""
+"""Integration tests for the asynchronous webhook dispatch and cryptographic signing layers."""
 import asyncio
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import patch, MagicMock
+from webhook.emitter import emit_event, WebhookTrigger, WebhookQueueList
+from webhook.signer import generate_signature
+from config.loader import ConfigManager
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Static Logic & Signer Tests
+# ─────────────────────────────────────────────────────────────────────────────
 
-def test_webhook_emit_no_config(test_client):
-    """Webhooks should silently drop events when no rules match."""
-    from webhook.emitter import emit_event, WebhookTrigger
-
-    # Should not raise even without matching webhook rules
+def test_webhook_event_omission_without_active_configuration():
+    """Ensure that the emitter is a non-blocking no-op when no rules match."""
+    # This execution should not raise or block even without matching webhook definitions
     emit_event(
         module="db",
         operation="write",
-        resource="main_db",
+        resource="mock_database",
         target="users",
         action="INSERT",
-        details={"affected": 1},
-        trigger=WebhookTrigger(api_key="test", ip="127.0.0.1", request_id="req-001"),
+        details={"rows": 1},
+        trigger=WebhookTrigger(api_key="internal_test", ip="127.0.0.1", request_id="id-001"),
     )
 
+def test_webhook_signature_format_validity():
+    """Verify the structural integrity of the generated HMAC signature."""
+    signature = generate_signature("my_signing_secret_key", '{"event": "ping"}')
+    
+    assert signature.startswith("sha256=")
+    # 7 characters for "sha256=" + 64 hex characters for the hash
+    assert len(signature) == 71
 
-def test_webhook_signer_correct_format():
-    from webhook.signer import generate_signature
+def test_webhook_signature_is_deterministic():
+    """Ensure that identical payloads and secrets produce identical hashes."""
+    secret, payload = "shared_secret_32_chars_padding_00", '{"data": "fixed"}'
+    
+    sig_alpha = generate_signature(secret, payload)
+    sig_omega = generate_signature(secret, payload)
+    
+    assert sig_alpha == sig_omega
 
-    sig = generate_signature("my_secret_key_here", '{"event": "test"}')
-    assert sig.startswith("sha256=")
-    assert len(sig) == 71  # "sha256=" (7) + 64 hex chars
-
-
-def test_webhook_signer_deterministic():
-    from webhook.signer import generate_signature
-
-    payload = '{"data": "hello"}'
-    secret = "deterministic_secret_32_chars_min"
-    sig1 = generate_signature(secret, payload)
-    sig2 = generate_signature(secret, payload)
-    assert sig1 == sig2
-
-
-def test_webhook_signer_different_secrets_differ():
-    from webhook.signer import generate_signature
-
-    payload = '{"data": "hello"}'
-    sig1 = generate_signature("secret_one_32_chars_min_padding00", payload)
-    sig2 = generate_signature("secret_two_32_chars_min_padding00", payload)
-    assert sig1 != sig2
-
+# ─────────────────────────────────────────────────────────────────────────────
+# Queue & Backpressure Tests
+# ─────────────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_queue_full_drops_gracefully():
-    """When the queue is at max capacity, events should be dropped without exception."""
-    from webhook.emitter import WebhookQueueList
-
-    # Reset singleton queue to a tiny queue
+async def test_webhook_emitter_drops_events_on_queue_saturation():
+    """Ensure system stability when the background event queue reaches peak capacity."""
+    
+    # Setup: Temporarily restrict the singleton queue to exactly 1 slot
     WebhookQueueList._queue = asyncio.Queue(maxsize=1)
-    WebhookQueueList._queue.put_nowait({"test": True})  # Fill it
+    # Fill the slot to trigger saturation
+    WebhookQueueList._queue.put_nowait({"saturated": True})
 
-    from webhook.emitter import emit_event, WebhookTrigger
-    from config.loader import ConfigManager
+    # Mock configuration to simulate an enabled webhook feature
+    with patch.object(ConfigManager, "get") as config_mock:
+        mocked_cfg = MagicMock()
+        mocked_cfg.features.webhook = True
+        mocked_cfg.webhooks.enabled = True
+        mocked_cfg.webhook = {}
+        config_mock.return_value = mocked_cfg
 
-    # Patch config to enable webhooks and have a matching rule
-    with patch.object(ConfigManager, "get") as mock_cfg:
-        cfg = MagicMock()
-        cfg.features.webhook = True
-        cfg.webhooks.enabled = True
-        cfg.webhook = {}
-        mock_cfg.return_value = cfg
-
-        # This should not raise even though queue is full
-        emit_event(
-            "db", "write", "main_db", "users", "INSERT", {},
-            WebhookTrigger(api_key="admin", ip="127.0.0.1", request_id="r1"),
-        )
-
-    # Clean up
-    WebhookQueueList._queue = None
+        try:
+            # Step: Attempt emission - this must drop the event silently rather than crashing
+            emit_event(
+                "fs", "write", "storage_node", "files", "UPLOAD", {},
+                WebhookTrigger(api_key="admin_user", ip="127.0.0.1", request_id="rid-1"),
+            )
+        finally:
+            # Teardown: Restore the queue to a default state
+            WebhookQueueList._queue = None

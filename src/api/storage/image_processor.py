@@ -1,9 +1,7 @@
 """
 On-the-fly image processing with streaming output.
-
 Processes images using Pillow (resize, format conversion) and streams
 the result directly to the client without holding the full output in RAM.
-Uses a temporary file as a buffer to avoid memory spikes on large images.
 """
 import os
 import tempfile
@@ -20,80 +18,79 @@ from api.errors import NexusGateException, ErrorCodes
 
 STREAM_CHUNK = 65536  # 64KB
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Resizing Handlers
+# ─────────────────────────────────────────────────────────────────────────────
 
-def process_image_and_stream(
-    file_path: str,
-    width: int = None,
-    height: int = None,
-    quality: int = 80,
-    format: str = None,
-) -> StreamingResponse:
+def _apply_resizing_filters(img, width: int = None, height: int = None):
+    """Executes spatial adjustments ensuring memory efficiency dynamically."""
+    if width and height:
+        img.thumbnail((width, height))
+    elif width:
+        ratio = width / float(img.size[0])
+        img = img.resize((width, int(float(img.size[1]) * ratio)), Image.Resampling.LANCZOS)
+    elif height:
+        ratio = height / float(img.size[1])
+        img = img.resize((int(float(img.size[0]) * ratio), height), Image.Resampling.LANCZOS)
+    return img
+
+def _resolve_image_format(img, req_format: str) -> str:
+    """Standardizes target encodings to valid PIL mappings."""
+    output = req_format.upper() if req_format else img.format or "JPEG"
+    return "JPEG" if output == "JPG" else output
+
+# ─────────────────────────────────────────────────────────────────────────────
+# IO Streaming Generators
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _stream_temp_buffer(tmp: tempfile.SpooledTemporaryFile):
+    """Yields chunks from the spooled temp file isolating file closures natively."""
+    try:
+        while chunk := tmp.read(STREAM_CHUNK):
+            yield chunk
+    finally:
+        tmp.close()
+
+def _package_streaming_response(tmp: tempfile.SpooledTemporaryFile, output_format: str) -> StreamingResponse:
+    """Bundles headers executing standard web streaming protocols."""
+    tmp.seek(0, 2)
+    content_length = tmp.tell()
+    tmp.seek(0)
+
+    return StreamingResponse(
+        _stream_temp_buffer(tmp),
+        media_type=f"image/{output_format.lower()}",
+        headers={
+            "Content-Length": str(content_length),
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Primary Routine
+# ─────────────────────────────────────────────────────────────────────────────
+
+def process_image_and_stream(file_path: str, width: int = None, height: int = None, quality: int = 80, format: str = None) -> StreamingResponse:
     if not HAS_PIL:
         raise NexusGateException(ErrorCodes.SERVER_INTERNAL, "Image processing requires Pillow library.", 501)
-
     if not os.path.exists(file_path):
         raise NexusGateException(ErrorCodes.FS_PATH_NOT_FOUND, f"File not found: {file_path}", 404)
 
     try:
-        img = Image.open(file_path)
+        img = _apply_resizing_filters(Image.open(file_path), width, height)
+        output_format = _resolve_image_format(img, format)
 
-        if width and height:
-            img.thumbnail((width, height))
-        elif width:
-            ratio = width / float(img.size[0])
-            new_height = int(float(img.size[1]) * ratio)
-            img = img.resize((width, new_height), Image.Resampling.LANCZOS)
-        elif height:
-            ratio = height / float(img.size[1])
-            new_width = int(float(img.size[0]) * ratio)
-            img = img.resize((new_width, height), Image.Resampling.LANCZOS)
-
-        output_format = format.upper() if format else img.format or "JPEG"
-        if output_format == "JPG":
-            output_format = "JPEG"
-
-        # Write to a temporary file instead of BytesIO to avoid RAM spikes.
-        # The temp file is auto-deleted when the response finishes streaming.
-        tmp = tempfile.SpooledTemporaryFile(max_size=1048576)  # Spools in RAM up to 1MB, then spills to disk
-
-        if output_format in ("JPEG", "WEBP"):
-            img.save(tmp, format=output_format, quality=quality, optimize=True)
-        elif output_format == "PNG":
-            img.save(tmp, format=output_format, optimize=True)
+        tmp = tempfile.SpooledTemporaryFile(max_size=1048576) 
+        
+        if output_format in ("JPEG", "WEBP", "PNG"):
+            img.save(tmp, format=output_format, quality=quality if output_format != "PNG" else None, optimize=True)
         else:
             img.save(tmp, format=output_format)
 
-        # Close the PIL image to free the source file handle immediately
         img.close()
-
-        tmp.seek(0, 2)
-        content_length = tmp.tell()
-        tmp.seek(0)
-
-        mime_type = f"image/{output_format.lower()}"
-
-        headers = {
-            "Content-Length": str(content_length),
-            "Cache-Control": "public, max-age=31536000, immutable",
-            "X-Content-Type-Options": "nosniff",
-        }
-
-        def sync_streamer():
-            """Yield chunks from the spooled temp file."""
-            try:
-                while True:
-                    chunk = tmp.read(STREAM_CHUNK)
-                    if not chunk:
-                        break
-                    yield chunk
-            finally:
-                tmp.close()
-
-        return StreamingResponse(
-            sync_streamer(),
-            media_type=mime_type,
-            headers=headers,
-        )
+        return _package_streaming_response(tmp, output_format)
+        
     except NexusGateException:
         raise
     except Exception as e:

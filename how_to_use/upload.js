@@ -6,140 +6,194 @@ const crypto = require('crypto');
 
 /**
  * NEXUSGATE CHUNKED UPLOADER
- * ──────────────────────────
- * Bypasses server body limits by splitting files into smaller 10MB segments.
+ * Efficiently handles large file uploads by segmenting them into small chunks.
  */
 
-// --- 🛠️ Configurations ---
-const envPath = path.resolve(__dirname, '.env');
-const env = fs.existsSync(envPath)
-    ? Object.fromEntries(fs.readFileSync(envPath, 'utf8').split('\n').filter(l => l.includes('=')).map(l => l.split('=').map(s => s.trim().replace(/"/g, ''))))
-    : {};
+// ─────────────────────────────────────────────────────────────────────────────
+// Configuration Loader
+// ─────────────────────────────────────────────────────────────────────────────
 
-const CONFIG = {
-    url: env.NEXUSGATE_URL || 'http://localhost:4500',
-    key_name: env.NEXUSGATE_KEY_NAME || 'example',
-    secret: env.NEXUSGATE_KEY_SECRET || 'your_secret_key_here',
-    chunk_size: 9437184, // ~9MB (Staying safely under the 10MB limit)
-};
+function fetchConfig() {
+    const envPath = path.resolve(__dirname, '.env');
+    const envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
 
-const authHeader = `Bearer ${Buffer.from(`${CONFIG.key_name}:${CONFIG.secret}`).toString('base64')}`;
+    const env = Object.fromEntries(
+        envContent.split('\n')
+            .filter(line => line.includes('='))
+            .map(line => {
+                const [key, ...rest] = line.split('=');
+                return [key.trim(), rest.join('=').trim().replace(/"/g, '')];
+            })
+    );
 
-async function request(apiPath, method, body = null, headers = {}) {
-    const url = new URL(`${CONFIG.url}${apiPath}`);
-    const options = {
-        method: method,
+    return {
+        baseUrl: env.NEXUSGATE_URL || 'http://localhost:4500',
+        keyName: env.NEXUSGATE_KEY_NAME || 'example',
+        keySecret: env.NEXUSGATE_KEY_SECRET || 'your_secret_key_here',
+        chunkSizeBytes: 9437184, // ~9MB
+    };
+}
+
+const CONFIG = fetchConfig();
+const AUTH_TOKEN_B64 = Buffer.from(`${CONFIG.keyName}:${CONFIG.keySecret}`).toString('base64');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// API Engine
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function apiCall(endpoint, method, payload = null, customHeaders = {}) {
+    const url = new URL(`${CONFIG.baseUrl}${endpoint}`);
+    const networkClient = url.protocol === 'https:' ? https : http;
+
+    const requestOptions = {
+        method,
         rejectUnauthorized: false,
         headers: {
-            'Authorization': authHeader,
-            ...headers
+            'Authorization': `Bearer ${AUTH_TOKEN_B64}`,
+            ...customHeaders
         }
     };
 
     return new Promise((resolve, reject) => {
-        const parsedUrl = new URL(CONFIG.url);
-        const lib = parsedUrl.protocol === 'https:' ? https : http;
-        const req = lib.request(url, options, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-                try {
-                    const parsed = JSON.parse(data);
-                    if (res.statusCode >= 200 && res.statusCode < 300) resolve(parsed);
-                    else reject(new Error(`Status ${res.statusCode}: ${JSON.stringify(parsed.error || parsed)}`));
-                } catch (e) {
-                    reject(new Error(`Status ${res.statusCode}: ${data}`));
-                }
-            });
+        const req = networkClient.request(url, requestOptions, (res) => {
+            let buffer = '';
+            res.on('data', chunk => buffer += chunk);
+            res.on('end', () => processApiResponse(res, buffer, resolve, reject));
         });
+
         req.on('error', reject);
-        if (body) req.write(body);
+        if (payload) req.write(payload);
         req.end();
     });
 }
 
-async function listStorages() {
-    process.stdout.write('📦 Fetching available storages...\n');
+function processApiResponse(res, rawBody, resolve, reject) {
     try {
-        const res = await request('/api/fs/storages', 'GET');
-        console.table(res.data.storages.map(s => ({ "Alias": s.name, "Status": s.status, "Limit": s.limit })));
+        const parsed = JSON.parse(rawBody);
+        const isOk = res.statusCode >= 200 && res.statusCode < 300;
+
+        if (isOk) return resolve(parsed);
+
+        const errorDesc = parsed.error ? JSON.stringify(parsed.error) : rawBody;
+        reject(new Error(`[${res.statusCode}] ${errorDesc}`));
     } catch (e) {
-        console.error(`❌ List Error: ${e.message}`);
+        reject(new Error(`[${res.statusCode}] Could not parse JSON: ${rawBody}`));
     }
 }
 
-async function uploadFileChunked(alias, localPath, remotePath) {
-    if (!fs.existsSync(localPath)) return console.error(`❌ Local file not found: ${localPath}`);
+// ─────────────────────────────────────────────────────────────────────────────
+// Upload Procedures
+// ─────────────────────────────────────────────────────────────────────────────
 
-    const fileName = path.basename(localPath);
-    const destPath = remotePath || fileName;
-    const stats = fs.statSync(localPath);
-    const totalSize = stats.size;
+async function discoverStorages() {
+    process.stdout.write('📦 Fetching available storages...\n');
+    try {
+        const responseData = await apiCall('/api/v1/fs/storages', 'GET');
+        const summary = responseData.data.storages.map(s => ({
+            "Alias": s.name,
+            "Status": s.status,
+            "Limit": s.limit
+        }));
+        console.table(summary);
+    } catch (error) {
+        console.error(`❌ Discovery failed: ${error.message}`);
+    }
+}
 
-    console.log(`🚀 [START] Chunked Upload: '${fileName}' (${(totalSize / 1024 / 1024).toFixed(2)} MB)`);
+async function startUploadSession(alias, fileName, remotePath, totalSize) {
+    return apiCall(`/api/v1/fs/${alias}/upload`, 'POST', JSON.stringify({
+        action: 'initiate',
+        filename: fileName,
+        path: remotePath,
+        total_size: totalSize,
+        chunk_size: CONFIG.chunkSizeBytes
+    }), { 'Content-Type': 'application/json' });
+}
+
+async function uploadSingleChunk(alias, uploadId, chunkIndex, buffer) {
+    const chunkHash = crypto.createHash('sha256').update(buffer).digest('hex');
+    const boundary = `----NexusGateBoundary${crypto.randomBytes(8).toString('hex')}`;
+
+    const multipartBody = Buffer.concat([
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="action"\r\n\r\nchunk\r\n`),
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="upload_id"\r\n\r\n${uploadId}\r\n`),
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="chunk_index"\r\n\r\n${chunkIndex}\r\n`),
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="chunk_hash"\r\n\r\n${chunkHash}\r\n`),
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="blob"\r\nContent-Type: application/octet-stream\r\n\r\n`),
+        buffer,
+        Buffer.from(`\r\n--${boundary}--\r\n`)
+    ]);
+
+    return apiCall(`/api/v1/fs/${alias}/upload`, 'POST', multipartBody, {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': multipartBody.length
+    });
+}
+
+/**
+ * Orchestrates a complete chunked file transfer.
+ */
+async function runChunkedUploadFlow(alias, localFilePath, targetRelativePath) {
+    if (!fs.existsSync(localFilePath)) return console.error(`❌ Local file missing: ${localFilePath}`);
+
+    const fileName = path.basename(localFilePath);
+    const destination = targetRelativePath || fileName;
+    const fileStats = fs.statSync(localFilePath);
+    const totalBytes = fileStats.size;
+
+    console.log(`🚀 [START] Chunked Transfer: '${fileName}' (${(totalBytes / 1024 / 1024).toFixed(2)} MB)`);
 
     try {
-        // 1. Initiate Session
-        process.stdout.write('🔗 Initializing session... ');
-        const init = await request(`/api/fs/${alias}/upload`, 'POST', JSON.stringify({
-            action: 'initiate',
-            filename: fileName,
-            path: destPath,
-            total_size: totalSize,
-            chunk_size: CONFIG.chunk_size
-        }), { 'Content-Type': 'application/json' });
+        const initResponse = await startUploadSession(alias, fileName, destination, totalBytes);
+        const { upload_id: uploadId, total_chunks: totalChunks, chunks: chunkMetadata } = initResponse.data;
 
-        const uploadId = init.data.upload_id;
-        console.log(`✅ ID: ${uploadId}`);
+        console.log(`✅ Session ID: ${uploadId}`);
 
-        // 2. Upload Chunks
-        const totalChunks = init.data.total_chunks;
-        const fd = fs.openSync(localPath, 'r');
+        const fileDescriptor = fs.openSync(localFilePath, 'r');
 
         for (let i = 0; i < totalChunks; i++) {
-            const buffer = Buffer.alloc(init.data.chunks[i].size);
-            fs.readSync(fd, buffer, 0, buffer.length, init.data.chunks[i].offset);
+            const currentChunkInfo = chunkMetadata[i];
+            const buffer = Buffer.alloc(currentChunkInfo.size);
+            fs.readSync(fileDescriptor, buffer, 0, buffer.length, currentChunkInfo.offset);
 
-            const hash = crypto.createHash('sha256').update(buffer).digest('hex');
-            const percent = ((i / totalChunks) * 100).toFixed(1);
+            const progress = ((i / totalChunks) * 100).toFixed(1);
+            process.stdout.write(`📤 Transmitting Chunk ${i + 1}/${totalChunks} (${progress}%)... `);
 
-            process.stdout.write(`📤 Uploading Chunk ${i + 1}/${totalChunks} (${percent}%)... `);
-
-            const boundary = `----ChunkBoundary${Math.random().toString(16)}`;
-            const payload = Buffer.concat([
-                Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="action"\r\n\r\nchunk\r\n`),
-                Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="upload_id"\r\n\r\n${uploadId}\r\n`),
-                Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="chunk_index"\r\n\r\n${i}\r\n`),
-                Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="chunk_hash"\r\n\r\n${hash}\r\n`),
-                Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="blob"\r\nContent-Type: application/octet-stream\r\n\r\n`),
-                buffer,
-                Buffer.from(`\r\n--${boundary}--\r\n`)
-            ]);
-
-            await request(`/api/fs/${alias}/upload`, 'POST', payload, {
-                'Content-Type': `multipart/form-data; boundary=${boundary}`,
-                'Content-Length': payload.length
-            });
+            await uploadSingleChunk(alias, uploadId, i, buffer);
             console.log('✅');
         }
-        fs.closeSync(fd);
 
-        // 3. Finalize
-        process.stdout.write('🏁 Finalizing and merging... ');
-        const result = await request(`/api/fs/${alias}/upload`, 'POST', JSON.stringify({
+        fs.closeSync(fileDescriptor);
+
+        process.stdout.write('🏁 Committing merge... ');
+        const finalizeResponse = await apiCall(`/api/v1/fs/${alias}/upload`, 'POST', JSON.stringify({
             action: 'finalize',
             upload_id: uploadId
         }), { 'Content-Type': 'application/json' });
 
-        console.log('✨ Success!');
-        console.log(`🔗 Path: ${result.data.file.path}`);
-    } catch (e) {
-        console.error(`\n❌ ERROR: ${e.message}`);
+        console.log('✨ Successful Transfer!');
+        console.log(`🔗 Remote Path: ${finalizeResponse.data.file.path}`);
+    } catch (error) {
+        console.error(`\n❌ TRANSFER ERROR: ${error.message}`);
     }
 }
 
-// --- CLI ---
-const args = process.argv.slice(2);
-if (args.length === 0) listStorages();
-else if (args.length >= 2) uploadFileChunked(args[0], args[1], args[2]);
-else console.log('Usage: node upload.js <alias> <local_path> [remote_path]');
+// ─────────────────────────────────────────────────────────────────────────────
+// Command Line Interface
+// ─────────────────────────────────────────────────────────────────────────────
+
+function main() {
+    const [aliasArg, localPathArg, remotePathArg] = process.argv.slice(2);
+
+    if (!aliasArg) {
+        return discoverStorages();
+    }
+
+    if (!localPathArg) {
+        return console.log('Usage: node upload.js <alias> <local_path> [remote_path]');
+    }
+
+    runChunkedUploadFlow(aliasArg, localPathArg, remotePathArg);
+}
+
+main();

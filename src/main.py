@@ -3,25 +3,33 @@ import gc
 import uvicorn
 from config.loader import ConfigManager
 
-def main():
-    # Keep CPU/RAM usage low by tweaking the GC thresholds and forcing eager cleanup
-    # Default is (700, 10, 10). Let's lower generation 0 threshold to free memory frequently.
+def _optimize_garbage_collection():
+    """Twitches GC thresholds favoring eager memory deallocation over CPU speed."""
     gc.set_threshold(300, 5, 5)
 
-    # Load config initially before app starts.
-    config_path = "config.toml"
+def _resolve_config_path() -> str:
+    """Parses optional CLI arguments targeting a specific TOML configuration."""
     if len(sys.argv) > 1 and sys.argv[1] == "--config":
-        config_path = sys.argv[2]
+        return sys.argv[2]
+    return "config.toml"
 
-    config = ConfigManager.load(config_path)
-
-    # Attempt to load uvloop for ultra-fast C-based asyncio event loop (Unix only)
+def _acquire_event_loop_strategy() -> str:
+    """Safely delegates execution to the ultra-fast C-backed uvloop if on UNIX."""
     try:
         import uvloop
         uvloop.install()
-        loop_opt = "uvloop"
+        return "uvloop"
     except ImportError:
-        loop_opt = "auto"
+        return "auto"
+
+def main():
+    """Main process bootloader natively invoking the Uvicorn ASGI server."""
+    _optimize_garbage_collection()
+    
+    config_path = _resolve_config_path()
+    config = ConfigManager.load(config_path)
+    
+    loop_strategy = _acquire_event_loop_strategy()
 
     uvicorn.run(
         "server.app:create_app",
@@ -32,7 +40,7 @@ def main():
         log_level=config.logging.level.lower(),
         timeout_keep_alive=config.server.request_timeout,
         http="httptools",
-        loop=loop_opt,
+        loop=loop_strategy,
         limit_concurrency=config.server.max_connections
     )
 

@@ -3,83 +3,115 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-// --- 🛠️ Configurations ---
-const envPath = path.resolve(__dirname, '.env');
-const env = fs.existsSync(envPath)
-    ? Object.fromEntries(fs.readFileSync(envPath, 'utf8').split('\n').filter(l => l.includes('=')).map(l => l.split('=').map(s => s.trim().replace(/"/g, ''))))
-    : {};
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants & Configuration
+// ─────────────────────────────────────────────────────────────────────────────
 
-const CONFIG = {
-    url: env.NEXUSGATE_URL || 'http://localhost:4500',
-    db_name: env.NEXUSGATE_DB || 'example_db',
-    key_name: env.NEXUSGATE_KEY_NAME || 'example',
-    secret: env.NEXUSGATE_KEY_SECRET || 'your_secret_key_here'
-};
-
-const tables = [
+const TABLES_TO_SEED = [
     'users', 'products', 'orders', 'categories', 'inventory',
     'suppliers', 'reviews', 'locations', 'departments', 'employees',
     'projects', 'tasks', 'events', 'tags', 'settings',
     'logs', 'messages', 'sessions', 'profiles', 'teams'
 ];
 
-const auth_token = Buffer.from(`${CONFIG.key_name}:${CONFIG.secret}`).toString('base64');
+function loadLocalEnv() {
+    const envPath = path.resolve(__dirname, '.env');
+    if (!fs.existsSync(envPath)) return {};
 
-async function request(path, method, body) {
-    const data = JSON.stringify(body);
-    const options = {
-        hostname: new URL(CONFIG.url).hostname,
-        port: new URL(CONFIG.url).port || (new URL(CONFIG.url).protocol === 'https:' ? 443 : 80),
-        path: path,
+    return Object.fromEntries(
+        fs.readFileSync(envPath, 'utf8').split('\n')
+          .filter(l => l.includes('='))
+          .map(l => {
+              const [k, ...v] = l.split('=');
+              return [k.trim(), v.join('=').trim().replace(/"/g, '')];
+          })
+    );
+}
+
+const env = loadLocalEnv();
+const API_URL = env.NEXUSGATE_URL || 'http://localhost:4500';
+const DB_NAME = env.NEXUSGATE_DB || 'example_db';
+const AUTH_TOKEN = Buffer.from(`${env.NEXUSGATE_KEY_NAME || 'example'}:${env.NEXUSGATE_KEY_SECRET || 'your_secret_key_here'}`).toString('base64');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Low-level HTTP Client
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function executeRequest(endpoint, method, requestBody) {
+    const payloadString = JSON.stringify(requestBody);
+    const url = new URL(API_URL);
+    const agent = url.protocol === 'https:' ? https : http;
+
+    const requestOptions = {
+        hostname: url.hostname,
+        port: url.port || (url.protocol === 'https:' ? 443 : 80),
+        path: endpoint,
         method: method,
         rejectUnauthorized: false,
         headers: {
-            'Authorization': `Bearer ${auth_token}`,
+            'Authorization': `Bearer ${AUTH_TOKEN}`,
             'Content-Type': 'application/json',
-            'Content-Length': data.length
+            'Content-Length': Buffer.byteLength(payloadString)
         }
     };
 
     return new Promise((resolve, reject) => {
-        const parsedUrl = new URL(CONFIG.url);
-        const lib = parsedUrl.protocol === 'https:' ? https : http;
-        const req = lib.request(options, (res) => {
-            let resData = '';
-            res.on('data', (chunk) => resData += chunk);
+        const req = agent.request(requestOptions, (res) => {
+            let buffer = '';
+            res.on('data', chunk => buffer += chunk);
             res.on('end', () => {
                 if (res.statusCode >= 200 && res.statusCode < 300) {
-                    resolve(JSON.parse(resData));
-                } else {
-                    reject(new Error(`Status ${res.statusCode}: ${resData}`));
+                    return resolve(JSON.parse(buffer));
                 }
+                reject(new Error(`[${res.statusCode}] ${buffer}`));
             });
         });
         req.on('error', reject);
-        req.write(data);
+        req.write(payloadString);
         req.end();
     });
 }
 
-async function seed() {
+// ─────────────────────────────────────────────────────────────────────────────
+// Seeding Procedures
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Creates a standard table schema if it doesn't already exist.
+ */
+async function ensureTableExists(tableName) {
+    const tableStructureSql = `
+        CREATE TABLE IF NOT EXISTS ${tableName} (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            tag VARCHAR(255) DEFAULT 'test_item',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`;
+
+    return executeRequest(`/api/v1/db/${DB_NAME}/query`, 'POST', { sql: tableStructureSql });
+}
+
+/**
+ * Injects initial test data into the target table.
+ */
+async function insertInitialData(tableName) {
+    const dummyDataSql = `
+        INSERT INTO ${tableName} (tag)
+        VALUES ('${tableName}_seed_data_1'), ('${tableName}_seed_data_2'), ('${tableName}_seed_data_3')`;
+
+    return executeRequest(`/api/v1/db/${DB_NAME}/query`, 'POST', { sql: dummyDataSql });
+}
+
+/**
+ * Orchestrates the full database seeding process.
+ */
+async function startSeedingProcess() {
     console.log('🚀 Starting NexusGate seeder...');
 
-    for (const table of tables) {
-        process.stdout.write(`Creating table: ${table}... `);
+    for (const tableName of TABLES_TO_SEED) {
+        process.stdout.write(`Provisioning table: ${tableName}... `);
         try {
-            // 1. Create Table
-            await request(`/api/db/${CONFIG.db_name}/query`, 'POST', {
-                sql: `CREATE TABLE IF NOT EXISTS ${table} (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    tag VARCHAR(255) DEFAULT 'test_item',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )`
-            });
-
-            // 2. Insert dummy data
-            await request(`/api/db/${CONFIG.db_name}/query`, 'POST', {
-                sql: `INSERT INTO ${table} (tag) VALUES ('${table}_seed_data_1'), ('${table}_seed_data_2'), ('${table}_seed_data_3')`
-            });
-
+            await ensureTableExists(tableName);
+            await insertInitialData(tableName);
             console.log('✅ Done');
         } catch (error) {
             console.log(`❌ Error: ${error.message}`);
@@ -89,4 +121,4 @@ async function seed() {
     console.log('\n🌟 All tables seeded successfully!');
 }
 
-seed().catch(console.error);
+startSeedingProcess().catch(console.error);

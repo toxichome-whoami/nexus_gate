@@ -1,123 +1,123 @@
 from typing import Dict, Any, List, Tuple
 
+# ─────────────────────────────────────────────────────────────────────────────
+# JSON Operator Translators
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _process_array_operator(col: str, op: str, val: Any, pname: str, where_parts: list, params: dict) -> None:
+    """Matches JSON collection arrays explicitly against standard inclusion statements."""
+    if not isinstance(val, (list, tuple)):
+        raise ValueError(f"{op} operator requires a list or tuple structure array")
+        
+    sql_op = "IN" if op == "$in" else "NOT IN"
+    in_placeholders = []
+    
+    for array_index, item in enumerate(val):
+        in_pname = f"{pname}_{array_index}"
+        in_placeholders.append(f":{in_pname}")
+        params[in_pname] = item
+        
+    placeholders_str = ", ".join(in_placeholders)
+    where_parts.append(f"{col} {sql_op} ({placeholders_str})")
+
+def _process_null_operator(col: str, op: str, val: Any, where_parts: list) -> None:
+    """Translates implicit JS definitions mapping dynamically to IS parameters."""
+    if val is True:
+        where_parts.append(f"{col} IS NULL" if op == "$null" else f"{col} IS NOT NULL")
+    elif val is False:
+        where_parts.append(f"{col} IS NOT NULL" if op == "$null" else f"{col} IS NULL")
+
+def _process_standard_operator(col: str, op: str, val: Any, pname: str, where_parts: list, params: dict) -> None:
+    """Ingests basic operational tokens seamlessly."""
+    math_ops = {"$gt": ">", "$gte": ">=", "$lt": "<", "$lte": "<="}
+    
+    if op == "$eq":
+        where_parts.append(f"{col} = :{pname}")
+    elif op == "$ne":
+        where_parts.append(f"{col} != :{pname}")
+    elif op in math_ops:
+        where_parts.append(f"{col} {math_ops[op]} :{pname}")
+    elif op == "$like":
+        where_parts.append(f"{col} LIKE :{pname}")
+    elif op == "$ilike":
+        where_parts.append(f"LOWER({col}) LIKE LOWER(:{pname})")
+    elif op == "$between":
+        if not isinstance(val, list) or len(val) != 2:
+            raise ValueError("$between requires a strictly bound list of 2 values")
+        where_parts.append(f"{col} BETWEEN :{pname}_start AND :{pname}_end")
+        params[f"{pname}_start"], params[f"{pname}_end"] = val[0], val[1]
+        return
+    else:
+        raise ValueError(f"Operator node unsupported natively: {op}")
+        
+    params[pname] = val
+
+def _route_filter_criteria(col: str, criteria: dict, param_idx: int, where_parts: list, params: dict) -> int:
+    """Isolates traversal logic bounding JSON nested trees directly."""
+    for op, val in criteria.items():
+        pname = f"__p_{param_idx}"
+        param_idx += 1
+        
+        if op in ("$in", "$nin"):
+            _process_array_operator(col, op, val, pname, where_parts, params)
+        elif op in ("$null", "$not_null"):
+            _process_null_operator(col, op, val, where_parts)
+            param_idx -= 1
+        else:
+            _process_standard_operator(col, op, val, pname, where_parts, params)
+            
+    return param_idx
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dynamic SQL Generators
+# ─────────────────────────────────────────────────────────────────────────────
+
 def build_where_clause(filter_json: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
-    """
-    Parses a JSON filter object and builds a SQL WHERE clause fragment and params dictionary.
-    Supports: $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin, $like, $ilike, $null, $not_null
-    Returns: (where_clause_string, params_dict)
-    """
+    """Generates parameterized queries avoiding implicit manual concatenations completely."""
     if not filter_json:
         return "", {}
         
     where_parts = []
     params = {}
-    
-    # Very basic validation against SQL injection, in reality we map against known columns
-    # We will assume column names are sane for now, or validated upstream.
-    
     param_idx = 0
+    
     for col, criteria in filter_json.items():
         if isinstance(criteria, dict):
-            for op, val in criteria.items():
-                pname = f"__p_{param_idx}"
-                param_idx += 1
-                
-                if op == "$eq":
-                    where_parts.append(f"{col} = :{pname}")
-                    params[pname] = val
-                elif op == "$ne":
-                    where_parts.append(f"{col} != :{pname}")
-                    params[pname] = val
-                elif op in ("$gt", "$gte", "$lt", "$lte"):
-                    sql_op = {
-                        "$gt": ">", "$gte": ">=", 
-                        "$lt": "<", "$lte": "<="
-                    }[op]
-                    where_parts.append(f"{col} {sql_op} :{pname}")
-                    params[pname] = val
-                elif op in ("$in", "$nin"):
-                    if not isinstance(val, (list, tuple)):
-                        raise ValueError(f"{op} requires a list value")
-                    sql_op = "IN" if op == "$in" else "NOT IN"
-                    in_placeholders = []
-                    for i, item in enumerate(val):
-                        in_pname = f"{pname}_{i}"
-                        in_placeholders.append(f":{in_pname}")
-                        params[in_pname] = item
-                    placeholders_str = ", ".join(in_placeholders)
-                    where_parts.append(f"{col} {sql_op} ({placeholders_str})")
-                elif op == "$like":
-                    where_parts.append(f"{col} LIKE :{pname}")
-                    params[pname] = val
-                elif op == "$ilike":
-                    where_parts.append(f"LOWER({col}) LIKE LOWER(:{pname})") # Generic approach
-                    params[pname] = val
-                elif op == "$null":
-                    if val is True:
-                        where_parts.append(f"{col} IS NULL")
-                    elif val is False:
-                        where_parts.append(f"{col} IS NOT NULL")
-                    param_idx -= 1 # didn't use param
-                elif op == "$not_null": # Same as $null: false
-                    if val is True:
-                        where_parts.append(f"{col} IS NOT NULL")
-                    elif val is False:
-                        where_parts.append(f"{col} IS NULL")
-                    param_idx -= 1
-                elif op == "$between":
-                    if not isinstance(val, list) or len(val) != 2:
-                        raise ValueError("$between requires a list of 2 values")
-                    pname_start = f"{pname}_start"
-                    pname_end = f"{pname}_end"
-                    where_parts.append(f"{col} BETWEEN :{pname_start} AND :{pname_end}")
-                    params[pname_start] = val[0]
-                    params[pname_end] = val[1]
-                else:
-                    raise ValueError(f"Unsupported operator: {op}")
+            param_idx = _route_filter_criteria(col, criteria, param_idx, where_parts, params)
         else:
-            # implicit equal
             pname = f"__p_{param_idx}"
             param_idx += 1
             where_parts.append(f"{col} = :{pname}")
             params[pname] = criteria
             
-    where_clause = " AND ".join(where_parts)
-    return where_clause, params
+    return " AND ".join(where_parts), params
 
 def construct_insert(table: str, data: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     cols = list(data.keys())
     placeholders = [f":p_{i}" for i in range(len(cols))]
     sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(placeholders)})"
     
-    params = {f"p_{i}": val for i, val in enumerate(data.values())}
-    return sql, params
-    
+    return sql, {f"p_{i}": val for i, val in enumerate(data.values())}
+
 def construct_update(table: str, update_data: Dict[str, Any], filter_json: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     set_parts = []
     params = {}
     
-    # Update clause
-    for i, (k, v) in enumerate(update_data.items()):
-        pname = f"up_p_{i}"
-        set_parts.append(f"{k} = :{pname}")
-        params[pname] = v
+    for index, (col_key, col_val) in enumerate(update_data.items()):
+        pname = f"up_p_{index}"
+        set_parts.append(f"{col_key} = :{pname}")
+        params[pname] = col_val
         
-    set_clause = ", ".join(set_parts)
-    
-    # Where clause
     where_clause, filter_params = build_where_clause(filter_json)
     if not where_clause:
-        raise ValueError("Update filter cannot be empty.")
+        raise ValueError("Update filter nodes cannot inherently be executed unconstrained.")
         
     params.update(filter_params)
-    
-    sql = f"UPDATE {table} SET {set_clause} WHERE {where_clause}"
-    return sql, params
-    
+    return f"UPDATE {table} SET {', '.join(set_parts)} WHERE {where_clause}", params
+
 def construct_delete(table: str, filter_json: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     where_clause, params = build_where_clause(filter_json)
     if not where_clause:
-        raise ValueError("Delete filter cannot be empty.")
+        raise ValueError("Delete operations mandate structurally bound node limits.")
         
-    sql = f"DELETE FROM {table} WHERE {where_clause}"
-    return sql, params
+    return f"DELETE FROM {table} WHERE {where_clause}", params
