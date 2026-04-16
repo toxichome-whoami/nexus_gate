@@ -30,8 +30,8 @@ _READ_OPERATIONS = frozenset({"select", "show", "describe"})
 def _check_database_scope(alias: str) -> bool:
     """Verifies the authenticated session has access to the requested database alias."""
     auth = get_mcp_auth()
-    # Empty db_scope means unrestricted access to all databases
-    if not auth.db_scope:
+    # Empty db_scope or "*" means unrestricted access to all databases
+    if not auth.db_scope or "*" in auth.db_scope:
         return True
     return alias in auth.db_scope
 
@@ -43,8 +43,8 @@ async def _list_databases() -> list[TextContent]:
     auth = get_mcp_auth()
     all_aliases = list(ConfigManager.get().database.keys())
 
-    # Filter by scope if restrictions exist
-    if auth.db_scope:
+    # Filter by scope if restrictions exist and it's not a global wildcard
+    if auth.db_scope and "*" not in auth.db_scope:
         visible = [a for a in all_aliases if a in auth.db_scope]
     else:
         visible = all_aliases

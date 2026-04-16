@@ -43,8 +43,8 @@ def _resolve_safe_path(storage_root: str, user_path: str) -> str | None:
 def _check_storage_scope(alias: str) -> bool:
     """Verifies the authenticated session has access to the requested storage alias."""
     auth = get_mcp_auth()
-    # Empty fs_scope means unrestricted access to all storages
-    if not auth.fs_scope:
+    # Empty fs_scope or "*" means unrestricted access to all storages
+    if not auth.fs_scope or "*" in auth.fs_scope:
         return True
     return alias in auth.fs_scope
 
@@ -56,8 +56,8 @@ async def _list_storages() -> list[TextContent]:
     auth = get_mcp_auth()
     all_aliases = list(ConfigManager.get().storage.keys())
 
-    # Filter by scope if restrictions exist
-    if auth.fs_scope:
+    # Filter by scope if restrictions exist and it's not a global wildcard
+    if auth.fs_scope and "*" not in auth.fs_scope:
         visible = [a for a in all_aliases if a in auth.fs_scope]
     else:
         visible = all_aliases
