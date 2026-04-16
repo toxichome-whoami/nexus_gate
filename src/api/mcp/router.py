@@ -112,9 +112,12 @@ def _auth_error(message: str, status_code: int) -> _AuthenticationError:
 
 # -- Endpoints -------------------------------------------------------------
 
-@router.get("/sse")
+@router.api_route("/sse", methods=["GET", "POST"])
 async def handle_sse_connection(request: Request) -> Response:
-    """Opens a persistent SSE stream for an MCP client session."""
+    """
+    Handles both the initial SSE stream establishment (GET) and
+    direct message posting (POST) if the client uses a unified URL.
+    """
     try:
         _authenticate_from_request(request)
     except _AuthenticationError as auth_err:
@@ -123,13 +126,20 @@ async def handle_sse_connection(request: Request) -> Response:
     server = MCPServerManager.get()
 
     try:
-        async with _transport.connect_sse(
-            request.scope, request.receive, request._send
-        ) as (read_stream, write_stream):
-            await server.run(
-                read_stream,
-                write_stream,
-                server.create_initialization_options(),
+        if request.method == "GET":
+            # Establish the persistent event stream
+            async with _transport.connect_sse(
+                request.scope, request.receive, request._send
+            ) as (read_stream, write_stream):
+                await server.run(
+                    read_stream,
+                    write_stream,
+                    server.create_initialization_options(),
+                )
+        else:
+            # Handle incoming JSON-RPC messages from the client
+            await _transport.handle_post_message(
+                request.scope, request.receive, request._send
             )
     finally:
         clear_mcp_auth()
@@ -139,17 +149,5 @@ async def handle_sse_connection(request: Request) -> Response:
 
 @router.post("/messages")
 async def handle_mcp_message(request: Request) -> Response:
-    """Routes a JSON-RPC message to the matching tool or resource handler."""
-    try:
-        _authenticate_from_request(request)
-    except _AuthenticationError as auth_err:
-        return auth_err.response
-
-    try:
-        await _transport.handle_post_message(
-            request.scope, request.receive, request._send
-        )
-    finally:
-        clear_mcp_auth()
-
-    return ASGIPassThroughResponse()
+    """Alternative dedicated endpoint for JSON-RPC messages."""
+    return await handle_sse_connection(request)
