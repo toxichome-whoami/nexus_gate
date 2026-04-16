@@ -105,7 +105,7 @@ def create_app() -> FastAPI:
 
     # Middlewares (Injected globally)
     app.middleware("http")(_playground_middleware_handler)
-
+    
     app.add_middleware(LoggingMiddleware)
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(IdempotencyMiddleware)
@@ -120,11 +120,6 @@ def create_app() -> FastAPI:
     api_v1.include_router(storage.router, prefix="/fs")
     api_v1.include_router(federation.router, prefix="/fed")
     api_v1.include_router(admin_router, prefix="/admin")
-
-    # MCP Server (conditionally mounted to save resources when disabled)
-    if config.features.mcp:
-        from api.mcp import router as mcp_router
-        api_v1.include_router(mcp_router, prefix="/mcp")
 
     app.include_router(api_v1)
 

@@ -22,4 +22,3 @@ redis[hiredis]>=5.0.0
 Pillow>=10.2.0
 orjson
 httptools
-mcp[sse]>=1.0.0
