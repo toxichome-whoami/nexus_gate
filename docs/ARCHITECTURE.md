@@ -19,7 +19,7 @@ Every incoming request flows through the following middleware sequence:
 ## Handlers
 The pipeline converges at the Router which redirects to:
 - **Database (`/api/db`)**: Requests are intercepted by the `QueryExecutionPipeline` and `QueryValidator` classes. The `QueryValidator` employs a deterministic LRU cache to drastically reduce `sqlglot` AST parsing overhead. It walks the AST tree, validates user permissions against statement types, and transpiles syntax dynamically.
-- **Storage (`/api/fs`)**: Executes zero-copy aiofiles streamed proxies, intercepts chunk assemblies, processes image thumbnails via Pillow, and implements active `CircuitBreaker` integrations to block bandwidth saturation during DoS attempts.
+- **Storage (`/api/fs`)**: Executes zero-copy `aiofiles` streamed proxies and implements active `CircuitBreaker` integrations to block bandwidth saturation. All large file uploads via the `ChunkedUploadManager` use direct socket-to-disk 64KB streams (`write_chunk_stream`) with on-the-fly cryptographic hashing, rendering the gateway fully immune to Out-of-Memory (OOM) crashes during massive concurrent uploads.
 
 ## Webhook Queue
 Write events (Uploads, Inserts, Updates, Deletes) are dropped into a non-blocking `asyncio.Queue` via `emitter.py`. The `dispatcher.py` background worker strips items from the queue, calculates `HMAC-SHA256` payload signatures using the target's secret, and attempts delivery via HTTP POST, implementing exponential backoff retries on failure.

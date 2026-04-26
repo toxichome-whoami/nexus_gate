@@ -68,20 +68,27 @@ class ChunkedUploadManager:
         return await CacheManager.get(f"upload:{upload_id}")
         
     @classmethod
-    async def write_chunk(cls, upload_id: str, index: int, chunk_hash: str, file_bytes: bytes):
+    async def write_chunk_stream(cls, upload_id: str, index: int, chunk_hash: str, file_stream):
         session = await cls.get_session(upload_id)
         if not session:
             raise NexusGateException(ErrorCodes.FS_UPLOAD_EXPIRED, "Upload session missing or expired", 404)
             
-        if hashlib.sha256(file_bytes).hexdigest() != chunk_hash:
+        temp_path = os.path.join("./storage", ".tmp", upload_id, f"chunk_{index}")
+        sha256_hash = hashlib.sha256()
+        bytes_written = 0
+        
+        async with aiofiles.open(temp_path, "wb") as f:
+            while chunk := await file_stream.read(65536):
+                await f.write(chunk)
+                sha256_hash.update(chunk)
+                bytes_written += len(chunk)
+                
+        if sha256_hash.hexdigest() != chunk_hash:
+            os.remove(temp_path)
             raise NexusGateException(ErrorCodes.FS_CHECKSUM_MISMATCH, "Chunk checksum block corrupted", 400)
             
-        temp_path = os.path.join("./storage", ".tmp", upload_id, f"chunk_{index}")
-        async with aiofiles.open(temp_path, "wb") as f:
-            await f.write(file_bytes)
-            
         session["uploaded_chunks"].append(index)
-        session["uploaded_bytes"] += len(file_bytes)
+        session["uploaded_bytes"] += bytes_written
         await CacheManager.set(f"upload:{upload_id}", session, ttl=3600)
         
     @classmethod
