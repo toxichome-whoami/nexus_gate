@@ -70,7 +70,7 @@ def _build_scanner(alias: str) -> UploadScanner:
         except Exception:
             pass
         allowed_ext, blocked_ext = storage_cfg.allowed_extensions or [], storage_cfg.blocked_extensions or []
-        
+
     return UploadScanner(allowed_extensions=allowed_ext, blocked_extensions=blocked_ext, max_file_size=max_file_size)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -79,9 +79,9 @@ def _build_scanner(alias: str) -> UploadScanner:
 
 def _append_remote_storages(alias: str, remote_payload: list, remote_storages_map: dict) -> None:
     for fs in remote_payload:
-        if fs.get("federated"): 
+        if fs.get("federated"):
             continue
-            
+
         fs_name = fs.get("name")
         health_status = remote_storages_map.get(fs_name, {})
         remote_storages_map[fs_name] = {
@@ -114,7 +114,7 @@ async def _fetch_remote_storages(alias: str, server_state: dict, active_storages
         federated_name = f"{alias}_{storage_name}"
         if "*" not in auth.fs_scope and federated_name not in auth.fs_scope:
             continue
-            
+
         is_dict = isinstance(info, dict)
         active_storages.append({
             "name": federated_name,
@@ -140,9 +140,8 @@ async def _process_streamed_chunk(f, chunk: bytes, scanner: UploadScanner, scann
             await f.close()
             if os.path.exists(target_path): os.remove(target_path)
             raise NexusGateException(e.code, e.message, 400)
-            
+
     await f.write(chunk)
-    total_written += len(chunk)
 
     if scanner.max_file_size > 0 and total_written > scanner.max_file_size:
         await f.close()
@@ -157,10 +156,10 @@ async def _stream_direct_upload(file, target_path: str, scanner: UploadScanner, 
 
     async with aiofiles.open(target_path, "wb") as f:
         while chunk := await file.read(UPLOAD_BUFFER_SIZE):
+            total_written += len(chunk)
             scanned = await _process_streamed_chunk(f, chunk, scanner, scanned, total_written, target_path, filename)
             sha256.update(chunk)
-            total_written += len(chunk)
-            
+
     return total_written, sha256.hexdigest()
 
 async def _handle_direct_upload(request: Request, alias: str, form, scanner: UploadScanner, auth: AuthContext):
@@ -185,14 +184,14 @@ async def _handle_direct_upload(request: Request, alias: str, form, scanner: Upl
 
 async def _handle_form_upload(request: Request, alias: str, scanner: UploadScanner, auth: AuthContext):
     form = await request.form()
-    
+
     if form.get("action") == "direct":
         return await _handle_direct_upload(request, alias, form, scanner, auth)
-        
+
     if form.get("action") == "chunk":
         upload_id, chunk_index = form.get("upload_id"), int(form.get("chunk_index"))
         await ChunkedUploadManager.write_chunk_stream(upload_id, chunk_index, form.get("chunk_hash"), form.get("file"))
-        
+
         session = await ChunkedUploadManager.get_session(upload_id)
         return success_response(request, {
             "upload_id": upload_id, "chunk_index": chunk_index, "status": "uploaded", "verified": True,
@@ -215,7 +214,7 @@ async def _action_initiate(request: Request, body: dict, alias: str, scanner: Up
         raise NexusGateException(e.code, e.message, 400 if e.code != ErrorCodes.FS_FILE_TOO_LARGE else 413)
 
     upload_id = f"upl_{uuid7().hex}"
-    
+
     try: chunk_size_bytes = parse_size(body.get("chunk_size", ConfigManager.get().storage.get(alias).chunk_size))
     except Exception: chunk_size_bytes = 10485760
 
@@ -227,7 +226,7 @@ async def _action_initiate(request: Request, body: dict, alias: str, scanner: Up
         "total_size": total_size, "chunk_size": chunk_size_bytes, "checksum_sha256": body.get("checksum_sha256"),
         "total_chunks": total_chunks, "uploaded_chunks": [], "uploaded_bytes": 0
     })
-    
+
     chunks = [{"index": i, "offset": i * chunk_size_bytes, "size": min(chunk_size_bytes, total_size - i * chunk_size_bytes), "status": "pending"} for i in range(total_chunks)]
     return success_response(request, {"upload_id": upload_id, "chunk_size": chunk_size_bytes, "total_chunks": total_chunks, "chunks": chunks})
 
@@ -236,7 +235,7 @@ async def _action_finalize(request: Request, body: dict, alias: str, auth: AuthC
     upload_id = body.get("upload_id")
     session = await ChunkedUploadManager.get_session(upload_id)
     target = _get_storage_path(alias, session["path"], auth)
-    
+
     result = await ChunkedUploadManager.finalize(upload_id, target)
     emit_event("fs", "write", alias, session["path"], "UPLOAD_CHUNKED", result,
         WebhookTrigger(api_key=auth.api_key_name, ip=request.client.host if request.client else "", request_id=getattr(request.state, "request_id", "-"), webhook_token=request.headers.get("X-NexusGate-Webhook-Token"))
@@ -244,17 +243,18 @@ async def _action_finalize(request: Request, body: dict, alias: str, auth: AuthC
     return success_response(request, {"file": {"name": session["filename"], "path": target, **result}})
 
 async def _handle_json_upload(request: Request, alias: str, scanner: UploadScanner, auth: AuthContext):
-    body, action = await request.json(), (await request.json()).get("action")
+    body = await request.json()
+    action = body.get("action")
     if action == "initiate": return await _action_initiate(request, body, alias, scanner)
     if action == "finalize": return await _action_finalize(request, body, alias, auth)
     if action == "status": return success_response(request, await ChunkedUploadManager.get_session(body.get("upload_id")))
-    if action == "cancel": 
+    if action == "cancel":
         await ChunkedUploadManager.cancel(body.get("upload_id"))
         return success_response(request, {"action": "cancel", "upload_id": body.get("upload_id")})
     raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "Invalid block definition", 400)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Core Web Handlers 
+# Core Web Handlers
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/storages")
@@ -263,9 +263,9 @@ async def list_storages(request: Request, auth: AuthContext = Depends(get_auth_c
     for name, storage_cfg in config.storage.items():
         if "*" in auth.fs_scope or name in auth.fs_scope:
             storages.append({
-                "name": name, "mode": storage_cfg.mode.value, 
-                "status": "available" if os.path.exists(storage_cfg.path) else "unavailable", 
-                "limit": storage_cfg.limit, "chunk_size": storage_cfg.chunk_size, 
+                "name": name, "mode": storage_cfg.mode.value,
+                "status": "available" if os.path.exists(storage_cfg.path) else "unavailable",
+                "limit": storage_cfg.limit, "chunk_size": storage_cfg.chunk_size,
                 "max_file_size": storage_cfg.max_file_size, "federated": False
             })
 
@@ -311,12 +311,12 @@ async def _execute_bulk_actions(request: Request, body: ActionRequest, alias: st
         results = await bulk_delete_paths([_get_storage_path(alias, s, auth) for s in body.sources])
         for i, res in enumerate(results): res["source"] = body.sources[i]
         return {"action": "bulk_delete", "results": results}
-        
+
     if body.action == "bulk_move":
         if not body.operations: raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "Missing 'operations'", 400)
         real_ops = [{"source": _get_storage_path(alias, o.get("source"), auth), "target": _get_storage_path(alias, o.get("target"), auth)} for o in body.operations if o.get("source") and o.get("target")]
         results = await bulk_move_paths(real_ops)
-        
+
         for i, res in enumerate(results):
             if i < len(body.operations):
                 res["source"] = body.operations[i].get("source")
@@ -331,7 +331,7 @@ async def execute_action(request: Request, body: ActionRequest, alias: str = Pat
     if body.action == "info": return success_response(request, {"action": "info", "source": body.source, "info": await get_file_info(_get_storage_path(alias, body.source, auth))})
     if body.action == "exists": return success_response(request, {"action": "exists", "source": body.source, "exists": os.path.exists(_get_storage_path(alias, body.source, auth))})
     if body.action in ("bulk_delete", "bulk_move"): return success_response(request, await _execute_bulk_actions(request, body, alias, auth))
-        
+
     if body.action == "delete":
         await delete_path(_get_storage_path(alias, body.source, auth))
         return success_response(request, {"action": "delete", "source": body.source, "status": "success"})
