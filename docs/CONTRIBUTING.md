@@ -26,7 +26,7 @@ Help us keep NexusGate open and inclusive. Please read and follow our [Code of C
     pytest tests/
     ```
 4.  **Linting**: We follow PEP8.
-5.  **Documentation**: Update the relevant files in `docs/` if you change any public API or configuration.
+6.  **Documentation**: Update the relevant files in `docs/` if you change any public API or configuration.
 
 ## 4. Pull Request Process
 

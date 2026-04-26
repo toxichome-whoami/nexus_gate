@@ -39,7 +39,7 @@ All three paths use Base64 encoding for transport, but the raw secrets are store
 | **Brute Force** | Multi-tier sliding-window rate limiting (Global, Per-Key, Per-IP) with a penalty cooldown that bans repeated violators. |
 | **Timing Attacks** | All secret comparisons (API keys, federation secrets, webhook tokens) use `hmac.compare_digest` (constant-time). |
 | **SSRF (Server-Side Request Forgery)** | The Federation proxy employs a strict Bogon/Localhost IP validator to ensure outbound network connections cannot be manipulated into routing to internal AWS metadata IPs or local resources. |
-| **Denial of Service (DoS)** | Protected via `CircuitBreaker` states linked to large Storage stream outputs. If bandwidth fails or loops block, the `storage_streaming` circuit breaks to protect the primary event loop. |
+| **Denial of Service (DoS)** | Protected via `CircuitBreaker` states linked to large Storage stream outputs. Additionally, all chunked file uploads bypass RAM by writing directly to disk via streaming sockets, neutralizing Out-Of-Memory (OOM) memory exhaustion attacks. |
 | **MIME Sniffing** | All responses include `X-Content-Type-Options: nosniff`. |
 | **XSS** | Strict `application/json` content-type enforcement and WAF-based input sanitization. |
 | **Clickjacking** | `X-Frame-Options: DENY` is added to all responses by the unified `SecurityHeadersMiddleware` (pure ASGI). |
