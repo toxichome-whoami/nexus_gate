@@ -1,4 +1,6 @@
 import sqlglot
+import functools
+from typing import Tuple
 from sqlglot import exp
 from typing import Optional
 from api.errors import NexusGateException, ErrorCodes
@@ -47,23 +49,39 @@ def _extract_target_table(expr: exp.Expression) -> str:
 # Primary SQL Validator Execution
 # ─────────────────────────────────────────────────────────────────────────────
 
+class QueryValidator:
+    """Enterprise-grade AST parser with deterministic caching for high-performance throughput."""
+
+    @staticmethod
+    @functools.lru_cache(maxsize=2048)
+    def _parse_and_extract(sql: str) -> Tuple[exp.Expression, str, str]:
+        """Deterministically parses SQL into an AST. Extremely CPU heavy, hence cached."""
+        try:
+            expressions = sqlglot.parse(sql)
+        except sqlglot.errors.ParseError as ast_error:
+            raise NexusGateException(ErrorCodes.DB_QUERY_INVALID, f"Parse tree failure: {str(ast_error)}", 400)
+
+        if len(expressions) > 1:
+            raise NexusGateException(ErrorCodes.DB_QUERY_BLOCKED, "Multiple parallel blocks strictly blocked.", 403)
+
+        expr = expressions[0]
+        if not expr:
+            raise NexusGateException(ErrorCodes.DB_QUERY_INVALID, "Detected implicitly empty node map.", 400)
+
+        query_type = expr.key.upper()
+        target_table = _extract_target_table(expr)
+        return expr, query_type, target_table
+
+    @classmethod
+    def validate(cls, sql: str, db_config: DatabaseDefConfig, user_mode: str) -> tuple[str, str, str]:
+        """Validates the cached AST against dynamic configuration and user constraints."""
+        expr, query_type, target_table = cls._parse_and_extract(sql)
+
+        _enforce_user_mode(expr, user_mode)
+        _enforce_query_policy(expr, db_config, query_type)
+
+        return expr.sql(), query_type.lower(), target_table
+
 def validate_query(sql: str, db_config: DatabaseDefConfig, user_mode: str) -> tuple[str, str, str]:
     """Parses and strictly confines the SQL query mapping ASTs natively preventing injections."""
-    try:
-        expressions = sqlglot.parse(sql)
-    except sqlglot.errors.ParseError as ast_error:
-        raise NexusGateException(ErrorCodes.DB_QUERY_INVALID, f"Parse tree failure: {str(ast_error)}", 400)
-
-    if len(expressions) > 1:
-        raise NexusGateException(ErrorCodes.DB_QUERY_BLOCKED, "Multiple parallel blocks strictly blocked via node logic.", 403)
-
-    expr = expressions[0]
-    if not expr:
-        raise NexusGateException(ErrorCodes.DB_QUERY_INVALID, "Detected implicitly empty node map.", 400)
-
-    query_type = expr.key.upper()
-    
-    _enforce_user_mode(expr, user_mode)
-    _enforce_query_policy(expr, db_config, query_type)
-
-    return expr.sql(), query_type.lower(), _extract_target_table(expr)
+    return QueryValidator.validate(sql, db_config, user_mode)
