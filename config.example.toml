@@ -7,15 +7,15 @@
 [server]
 host = "0.0.0.0"
 port = 4500
-workers = 0                   # 0 = auto-detect (CPUs * 2 + 1)
+workers = 0                     # 0 = auto-detect (CPUs * 2 + 1)
 max_connections = 10000
-request_timeout = 30          # Seconds
+request_timeout = 30            # Seconds
 body_limit = "10mb"
-tls_cert = ""                 # Path to TLS cert file. Leave blank to disable TLS.
-tls_key = ""                  # Path to TLS private key file.
-allowed_ips = []              # IPs exempt from rate limiting (e.g. ["127.0.0.1"])
+tls_cert = ""                   # Path to TLS cert file. Leave blank to disable TLS.
+tls_key = ""                    # Path to TLS private key file.
+allowed_ips = []                # IPs exempt from rate limiting (e.g. ["127.0.0.1"])
 trusted_proxies = ["127.0.0.1"]
-cors_origins = ["*"]          # CORS origins, use ["*"] for all
+cors_origins = ["*"]            # CORS origins, use ["*"] for all
 shutdown_timeout = 30
 
 # ─── Feature Flags ────────────────────────────
@@ -25,18 +25,18 @@ storage = true
 webhook = true
 federation = false
 metrics = true
-playground = false            # Enable /api/docs Swagger UI
-mcp = false                   # Enable MCP (Model Context Protocol) server
+playground = false # Enable /api/docs Swagger UI
+mcp = false        # Enable MCP (Model Context Protocol) server
 
 # ─── MCP ──────────────────────────────────────
 [mcp]
 server_name = "nexusgate"
-server_version = "1.0.0"
+server_version = "1.0.2"
 
 # ─── Logging ──────────────────────────────────
 [logging]
-level = "INFO"                # TRACE | DEBUG | INFO | WARN | ERROR
-format = "json"               # json | pretty
+level = "INFO"            # TRACE | DEBUG | INFO | WARN | ERROR
+format = "json"           # json | pretty
 directory = "./logs"
 file_prefix = "nexusgate"
 max_file_size = "50mb"
@@ -46,38 +46,38 @@ stdout = true
 # ─── Rate Limiting ────────────────────────────
 [rate_limit]
 enabled = true
-backend = "memory"            # memory | redis
-redis_url = ""                # Required if backend = "redis"
-window = 60                   # Seconds per window
-max_requests = 100            # Max requests per window per key
-burst = 20                    # Extra burst allowance
-penalty_cooldown = 300        # Seconds to ban after 10 consecutive violations
+backend = "memory"     # memory | redis
+redis_url = ""         # Required if backend = "redis"
+window = 60            # Seconds per window
+max_requests = 100     # Max requests per window per key
+burst = 20             # Extra burst allowance
+penalty_cooldown = 300 # Seconds to ban after 10 consecutive violations
 
 # ─── Caching ──────────────────────────────────
 [cache]
 enabled = true
-backend = "memory"            # memory | redis
+backend = "memory"   # memory | redis
 redis_url = ""
 max_memory = "100mb"
-default_ttl = 60              # Seconds
+default_ttl = 60     # Seconds
 query_cache = true
 fs_cache = true
 
 # ─── Webhook Global Settings ──────────────────
 [webhooks]
 enabled = true
-timeout = 5                   # HTTP delivery timeout in seconds
+timeout = 5                             # HTTP delivery timeout in seconds
 max_retries = 3
-retry_delay = 2               # Base delay seconds (exponential: delay^attempt)
+retry_delay = 2                         # Base delay seconds (exponential: delay^attempt)
 queue_size = 10000
 secret_header = "X-NexusGate-Signature"
 
 # ─── Circuit Breaker ──────────────────────────
 [circuit_breaker]
 enabled = true
-failure_threshold = 5         # Failures before tripping OPEN
-success_threshold = 3         # Successes in HALF_OPEN before CLOSED
-timeout = 30                  # Seconds before attempting HALF_OPEN
+failure_threshold = 5 # Failures before tripping OPEN
+success_threshold = 3 # Successes in HALF_OPEN before CLOSED
+timeout = 30          # Seconds before attempting HALF_OPEN
 
 # ─── API Keys ─────────────────────────────────
 # auto-generated on first run. The key name is the identifier,
@@ -86,10 +86,10 @@ timeout = 30                  # Seconds before attempting HALF_OPEN
 
 [api_key.admin]
 secret = "CHANGE_ME_to_a_random_64_char_secret_string_NOW"
-mode = "readwrite"            # readwrite | readonly | writeonly
-db_scope = ["*"]              # ["*"] or specific names e.g. ["main_db", "analytics"]
+mode = "readwrite"                                         # readwrite | readonly | writeonly
+db_scope = ["*"]                                           # ["*"] or specific names e.g. ["main_db", "analytics"]
 fs_scope = ["*"]
-rate_limit_override = 0       # 0 = use global limit
+rate_limit_override = 0                                    # 0 = use global limit
 
 [api_key.readonly_user]
 secret = "CHANGE_ME_to_another_random_64_char_secret_string"
@@ -102,7 +102,7 @@ rate_limit_override = 200
 # Each key under [database.*] defines a named database alias.
 
 [database.main_db]
-engine = "sqlite"             # sqlite | postgres | mysql | mariadb | mssql
+engine = "sqlite"                               # sqlite | postgres | mysql | mariadb | mssql
 url = "sqlite:///./data/main.db"
 mode = "readwrite"
 pool_min = 2
@@ -130,7 +130,7 @@ mode = "readwrite"
 limit = "10gb"
 chunk_size = "10mb"
 max_file_size = "500mb"
-allowed_extensions = []          # [] = all allowed
+allowed_extensions = []                                      # [] = all allowed
 blocked_extensions = [".exe", ".bat", ".sh", ".cmd", ".ps1"]
 
 [storage.assets]
@@ -176,7 +176,7 @@ enabled = true
 
 [federation]
 enabled = false
-sync_interval = 30            # Seconds between health syncs
+sync_interval = 30 # Seconds between health syncs
 
 # ─── Incoming Federation Keys ─────────────────
 # Each block allows ONE remote node to connect to this server.
@@ -184,9 +184,9 @@ sync_interval = 30            # Seconds between health syncs
 
 [federation.incoming.us_east_node]
 secret = "CHANGE_ME_unique_federation_secret_at_least_32_chars"
-mode = "readwrite"            # readonly | readwrite
-db_scope = ["*"]              # ["*"] = all databases, or ["main_db", "analytics"]
-fs_scope = ["*"]              # ["*"] = all storage, or ["uploads"]
+mode = "readwrite"                                              # readonly | readwrite
+db_scope = ["*"]                                                # ["*"] = all databases, or ["main_db", "analytics"]
+fs_scope = ["*"]                                                # ["*"] = all storage, or ["uploads"]
 description = "US East production node"
 
 # [federation.incoming.eu_mirror]
@@ -202,5 +202,5 @@ description = "US East production node"
 [federation.server.edge_us]
 url = "https://nexusgate-us.example.com"
 secret = "MUST_MATCH_the_remote_servers_incoming_key_secret"
-node_id = "us_east_node"      # Your identity on the remote server
-trust_mode = "verify"         # verify | trust (trust skips TLS cert check)
+node_id = "us_east_node"                                     # Your identity on the remote server
+trust_mode = "verify"                                        # verify | trust (trust skips TLS cert check)

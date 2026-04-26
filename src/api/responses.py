@@ -18,7 +18,7 @@ def _get_meta(request: Request, start_time: Optional[float] = None) -> RequestMe
         timestamp=time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
         duration_ms=round(duration_ms, 2),
         server=server_name,
-        version="1.0.0"
+        version="1.0.2"
     )
 
 def success_response(request: Request, data: Any, links: Optional[Dict[str, str]] = None, start_time: Optional[float] = None) -> dict:

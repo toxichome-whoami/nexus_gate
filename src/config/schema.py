@@ -66,7 +66,7 @@ class CacheConfig(BaseModel):
 class MCPConfig(BaseModel):
     """Configuration for the Model Context Protocol (MCP) server."""
     server_name: str = "nexusgate"
-    server_version: str = "1.0.0"
+    server_version: str = "1.0.2"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Dynamic Module Targets

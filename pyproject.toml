@@ -1,13 +1,11 @@
 [project]
 name = "nexusgate"
-version = "1.0.0"
+version = "1.0.2"
 description = "Industrial-grade unified API gateway for databases and file storage."
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "MIT"}
-authors = [
-    {name = "User", email = "user@example.com"}
-]
+license = { text = "MIT" }
+authors = [{ name = "User", email = "user@example.com" }]
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.27.1",
@@ -26,7 +24,7 @@ dependencies = [
     "SQLAlchemy[asyncio]>=2.0.28",
     "asyncpg>=0.29.0",
     "aiomysql>=0.2.0",
-    "aiosqlite>=0.20.0"
+    "aiosqlite>=0.20.0",
 ]
 
 [project.optional-dependencies]

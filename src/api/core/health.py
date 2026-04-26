@@ -22,14 +22,14 @@ async def _evaluate_database_health(config) -> tuple[dict, bool]:
     """Generates execution masks validating absolute pool availability maps."""
     db_status = {}
     all_dbs_up = True
-    
+
     for alias in config.database:
         engine = await DatabasePoolManager.get_engine(alias)
         is_up = await engine.health_check() if engine else False
         db_status[alias] = "up" if is_up else "down"
-        if not is_up: 
+        if not is_up:
             all_dbs_up = False
-            
+
     return db_status, all_dbs_up
 
 async def _evaluate_cache_health(config) -> dict:
@@ -37,7 +37,7 @@ async def _evaluate_cache_health(config) -> dict:
     cache_status = {"enabled": config.cache.enabled}
     if not config.cache.enabled:
         return cache_status
-        
+
     cache_status["backend"] = config.cache.backend
     if config.cache.backend == "redis":
         try:
@@ -48,7 +48,7 @@ async def _evaluate_cache_health(config) -> dict:
             cache_status["status"] = "down"
     else:
         cache_status.update(MemoryCache.stats())
-        
+
     return cache_status
 
 def _evaluate_storage_health(config) -> dict:
@@ -61,7 +61,7 @@ def _evaluate_storage_health(config) -> dict:
             storage_status[alias] = {"status": "up", "free_space_bytes": free_bytes}
         else:
             storage_status[alias] = {"status": "down"}
-            
+
     return storage_status
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ async def root(request: Request):
     return success_response(request, {
         "status": "online",
         "name": "NexusGate",
-        "version": "1.0.0",
+        "version": "1.0.2",
         "uptime_seconds": int(time.time() - uptime_start),
         "features": config.features.model_dump()
     })
@@ -106,7 +106,7 @@ async def health(request: Request):
             "databases": db_status,
             "storages": storage_status,
             "cache": cache_status,
-            "federation": {} 
+            "federation": {}
         },
         "system": system_stats
     })

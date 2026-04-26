@@ -60,7 +60,7 @@ class PlaygroundSecurityMiddleware:
                 }
             )
             return await response(scope, receive, send)
-            
+
         return await self.app(scope, receive, send)
 
 def _attach_middlewares(app: FastAPI):
@@ -98,7 +98,7 @@ def _build_error_response(request: Request, status_code: int, code: str, message
 
 def _attach_exception_handlers(app: FastAPI):
     """Registers standard RESTful JSON responses for unhandled application exceptions."""
-    
+
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         error_code = getattr(exc, "code", "SERVER_HTTP_ERROR")
@@ -116,7 +116,7 @@ def _attach_exception_handlers(app: FastAPI):
 def _attach_routers(app: FastAPI):
     """Registers all API versioned and unversioned core routing endpoints."""
     config = ConfigManager.get()
-    
+
     # Version 1 API structure
     api_v1 = APIRouter(prefix="/api/v1")
     api_v1.include_router(database.router, prefix="/db")
@@ -134,7 +134,7 @@ def _attach_routers(app: FastAPI):
     # Core System Endpoints (Unversioned)
     app.include_router(health.router)
     app.include_router(metrics_router)
-    
+
     # Static Assets
     @app.get("/favicon.ico", include_in_schema=False)
     async def serve_favicon():
@@ -152,7 +152,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="NexusGate",
         description="High-Performance Unified API Gateway with Dynamic Federation, Webhooks, MCP & Storage Management",
-        version="1.0.0",
+        version="1.0.2",
         lifespan=lifespan,
         docs_url="/api/docs",
         redoc_url=None,
