@@ -18,8 +18,8 @@ Every incoming request flows through the following middleware sequence:
 
 ## Handlers
 The pipeline converges at the Router which redirects to:
-- **Database (`/api/db`)**: Where SQLGlot intercepts dynamic JSON-to-SQL logic, walks the AST tree, validates user permissions against statement types (e.g. read-only cannot INSERT), and transpiles syntax dynamically to Postgres/MySQL/SQLite driver pools.
-- **Storage (`/api/fs`)**: Executes zero-copy aiofiles streamed proxies, intercepts chunk assemblies, processes image thumbnails via Pillow, and supports enterprise operations (info, exists, bulk_delete, bulk_move) before flushing the response chunk-by-chunk.
+- **Database (`/api/db`)**: Requests are intercepted by the `QueryExecutionPipeline` and `QueryValidator` classes. The `QueryValidator` employs a deterministic LRU cache to drastically reduce `sqlglot` AST parsing overhead. It walks the AST tree, validates user permissions against statement types, and transpiles syntax dynamically.
+- **Storage (`/api/fs`)**: Executes zero-copy aiofiles streamed proxies, intercepts chunk assemblies, processes image thumbnails via Pillow, and implements active `CircuitBreaker` integrations to block bandwidth saturation during DoS attempts.
 
 ## Webhook Queue
 Write events (Uploads, Inserts, Updates, Deletes) are dropped into a non-blocking `asyncio.Queue` via `emitter.py`. The `dispatcher.py` background worker strips items from the queue, calculates `HMAC-SHA256` payload signatures using the target's secret, and attempts delivery via HTTP POST, implementing exponential backoff retries on failure.

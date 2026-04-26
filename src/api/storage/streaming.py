@@ -9,6 +9,7 @@ import aiofiles
 from typing import Optional, Tuple
 from starlette.responses import Response, StreamingResponse
 from api.errors import NexusGateException, ErrorCodes
+from security.circuit_breaker import CircuitBreaker
 
 CHUNK_SIZE = 65536  # 64KB
 
@@ -33,7 +34,7 @@ def _evaluate_range_bounds(parts: list, file_size: int) -> Optional[Tuple[int, i
     if parts[0] == "":
         suffix_len = int(parts[1])
         return (file_size - suffix_len, file_size - 1) if 0 < suffix_len <= file_size else None
-        
+
     start = int(parts[0])
     end = int(parts[1]) if parts[1] else file_size - 1
     return (start, end) if 0 <= start < file_size and start <= end < file_size else None
@@ -55,17 +56,27 @@ def _parse_range_header(range_header: str, file_size: int) -> Optional[Tuple[int
 async def _file_range_streamer(file_path: str, start: int, end: int):
     """Pipes offset partitions exactly bounding chunks."""
     remaining = end - start + 1
-    async with aiofiles.open(file_path, mode="rb") as f:
-        await f.seek(start)
-        while remaining > 0 and (chunk := await f.read(min(CHUNK_SIZE, remaining))):
-            remaining -= len(chunk)
-            yield chunk
+    try:
+        async with aiofiles.open(file_path, mode="rb") as f:
+            await f.seek(start)
+            while remaining > 0 and (chunk := await f.read(min(CHUNK_SIZE, remaining))):
+                remaining -= len(chunk)
+                yield chunk
+        CircuitBreaker.record_success("storage_streaming")
+    except Exception as e:
+        CircuitBreaker.record_failure("storage_streaming")
+        raise e
 
 async def _file_streamer(file_path: str):
     """Transmits the entire buffer completely continuously."""
-    async with aiofiles.open(file_path, mode="rb") as f:
-        while chunk := await f.read(CHUNK_SIZE):
-            yield chunk
+    try:
+        async with aiofiles.open(file_path, mode="rb") as f:
+            while chunk := await f.read(CHUNK_SIZE):
+                yield chunk
+        CircuitBreaker.record_success("storage_streaming")
+    except Exception as e:
+        CircuitBreaker.record_failure("storage_streaming")
+        raise e
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Web Response Abstraction
@@ -84,6 +95,9 @@ def _build_base_headers(inline: bool, mime_type: str, filename: str, etag: str) 
 
 def serve_file(path: str, inline: bool = False, request_headers: Optional[dict] = None) -> Response:
     """Entry node processing HTTP static evaluations mapping streams natively."""
+    if CircuitBreaker.is_open("storage_streaming"):
+        raise NexusGateException(ErrorCodes.SERVER_OVERLOADED, "Storage streaming circuit is currently OPEN to protect bandwidth.", 503)
+
     if not os.path.exists(path) or not os.path.isfile(path):
         raise NexusGateException(ErrorCodes.FS_PATH_NOT_FOUND, f"File missing on explicit bounds.", 404)
 
