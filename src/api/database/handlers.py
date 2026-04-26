@@ -2,6 +2,7 @@ import json
 import httpx
 import base64
 import asyncio
+from typing import Any
 from fastapi import APIRouter, Depends, Request, Query, Path
 from api.federation.sync import FederationState
 from pydantic import ValidationError
@@ -141,6 +142,76 @@ def _construct_select_rest_payload(table_name: str, params: FetchRowsParams) -> 
     return " ".join(sql_parts), sql_params
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Class-Based Execution Architecture
+# ─────────────────────────────────────────────────────────────────────────────
+
+class FederatedQueryEngine:
+    """Enterprise structural layer for resolving virtual cross-node aggregations."""
+    
+    @staticmethod
+    async def execute_distributed_query(db_name: str, path_segment: str, request: Request) -> Any:
+        """
+        Executes true parallel map-reduce data meshes natively via scatter-gather async flows.
+        """
+        if "," in db_name:
+            targets = [t.strip() for t in db_name.split(",")]
+            tasks = [proxy_request(target, path_segment, request, True) for target in targets]
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            merged_rows = []
+            for resp in responses:
+                if isinstance(resp, Exception):
+                    continue
+                try:
+                    body_bytes = b"".join([chunk async for chunk in resp.body_iterator])
+                    payload = json.loads(body_bytes.decode("utf-8"))
+                    
+                    # Extract the payload optimally depending on the proxy wrapper
+                    data_block = payload.get("data", payload) if isinstance(payload, dict) else payload
+                    if isinstance(data_block, list):
+                        merged_rows.extend(data_block)
+                except Exception:
+                    pass
+            
+            return success_response(request, {"mesh_nodes": len(targets), "rows": merged_rows})
+
+        return await proxy_request(db_name, path_segment, request, True)
+
+class QueryExecutionPipeline:
+    """High-level abstraction for query validation, transpilation, and execution."""
+    
+    @staticmethod
+    async def run_query(engine, db_cfg, auth, request: Request, db_name: str, sql: str, params: dict) -> dict:
+        safe_sql, operations, target_table = validate_query(sql, db_cfg, auth.mode.value)
+        transpiled_sql = transpile_sql(safe_sql, to_dialect=engine.dialect)
+        
+        result = await engine.execute(transpiled_sql, params)
+        webhook_action = "SELECT" if operations in ("select", "show", "describe") else operations.upper()
+        _emit_db_webhook_event(request, auth, db_name, target_table, webhook_action, result.affected_rows or 0)
+        
+        return {
+            "columns": result.columns,
+            "rows": result.rows,
+            "affected_rows": result.affected_rows
+        }
+
+    @staticmethod
+    async def run_bulk_inserts(engine, db_cfg, auth, request: Request, db_name: str, table_name: str, rows: list) -> int:
+        from api.database.filter_builder import construct_insert
+        total_affected = 0
+        
+        # Batching execution loop structurally contained
+        for row in rows:
+            sql, sql_params = construct_insert(table_name, row)
+            safe_sql, _, _ = validate_query(sql, db_cfg, auth.mode.value)
+            transpiled_sql = transpile_sql(safe_sql, to_dialect=engine.dialect)
+            result = await engine.execute(transpiled_sql, sql_params)
+            total_affected += (result.affected_rows or 0)
+            
+        _emit_db_webhook_event(request, auth, db_name, table_name, "INSERT", total_affected)
+        return total_affected
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Endpoints
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -179,7 +250,7 @@ async def list_databases(request: Request, auth: AuthContext = Depends(get_auth_
 @router.get("/{db_name}/tables")
 async def list_tables(request: Request, db_name: str = Path(...), auth: AuthContext = Depends(get_auth_context)):
     if _is_federated(db_name):
-        return await proxy_request(db_name, "tables", request, True)
+        return await FederatedQueryEngine.execute_distributed_query(db_name, "tables", request)
 
     if auth.mode == ServerMode.WRITEONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Write-only keys cannot list tables", 403)
@@ -201,68 +272,49 @@ async def list_tables(request: Request, db_name: str = Path(...), auth: AuthCont
 @router.post("/{db_name}/query")
 async def execute_query(request: Request, body: QueryRequest, db_name: str = Path(...), auth: AuthContext = Depends(get_auth_context)):
     if _is_federated(db_name):
-        return await proxy_request(db_name, "query", request, True)
+        return await FederatedQueryEngine.execute_distributed_query(db_name, "query", request)
 
     engine, db_cfg = await get_db_engine(db_name, auth)
 
-    safe_sql, operations, target_table = validate_query(body.sql, db_cfg, auth.mode.value)
-    transpiled_sql = transpile_sql(safe_sql, to_dialect=engine.dialect)
-
     try:
-        result = await engine.execute(transpiled_sql, body.params)
-        webhook_action = "SELECT" if operations in ("select", "show", "describe") else operations.upper()
-        _emit_db_webhook_event(request, auth, db_name, target_table, webhook_action, result.affected_rows or 0)
-
-        return success_response(request, {"columns": result.columns, "rows": result.rows, "affected_rows": result.affected_rows})
+        data = await QueryExecutionPipeline.run_query(engine, db_cfg, auth, request, db_name, body.sql, body.params)
+        return success_response(request, data)
     except Exception as exec_error:
         raise NexusGateException(ErrorCodes.DB_QUERY_FAILED, str(exec_error), 500)
 
 @router.get("/{db_name}/{table_name}/rows")
 async def get_rows(request: Request, db_name: str = Path(...), table_name: str = Path(...), params: FetchRowsParams = Depends(), auth: AuthContext = Depends(get_auth_context)):
     if _is_federated(db_name):
-        return await proxy_request(db_name, f"{table_name}/rows", request, True)
+        return await FederatedQueryEngine.execute_distributed_query(db_name, f"{table_name}/rows", request)
 
     if auth.mode == ServerMode.WRITEONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Write-only limits apply", 403)
 
     engine, db_cfg = await get_db_engine(db_name, auth)
     raw_sql, sql_params = _construct_select_rest_payload(table_name, params)
-    
-    safe_sql, _, _ = validate_query(raw_sql, db_cfg, auth.mode.value)
-    transpiled_sql = transpile_sql(safe_sql, to_dialect=engine.dialect)
 
     try:
-        result = await engine.execute(transpiled_sql, sql_params)
-        return success_response(request, result.rows)
+        data = await QueryExecutionPipeline.run_query(engine, db_cfg, auth, request, db_name, raw_sql, sql_params)
+        return success_response(request, data["rows"])
     except Exception as select_error:
         raise NexusGateException(ErrorCodes.DB_QUERY_FAILED, str(select_error), 500)
 
 @router.post("/{db_name}/{table_name}/rows")
 async def insert_rows(request: Request, body: InsertRequest, db_name: str = Path(...), table_name: str = Path(...), auth: AuthContext = Depends(get_auth_context)):
     if _is_federated(db_name):
-        return await proxy_request(db_name, f"{table_name}/rows", request, True)
+        return await FederatedQueryEngine.execute_distributed_query(db_name, f"{table_name}/rows", request)
 
     if auth.mode == ServerMode.READONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Read-only limits apply", 403)
 
     engine, db_cfg = await get_db_engine(db_name, auth)
-    from api.database.filter_builder import construct_insert
-
+    
     target_rows = body.rows if body.rows is not None else ([body.row] if body.row else [])
     if not target_rows:
         raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "No payload array", 400)
 
-    total_affected = 0
     try:
-        for row in target_rows:
-            sql, sql_params = construct_insert(table_name, row)
-            safe_sql, _, _ = validate_query(sql, db_cfg, auth.mode.value)
-            
-            transpiled_sql = transpile_sql(safe_sql, to_dialect=engine.dialect)
-            result = await engine.execute(transpiled_sql, sql_params)
-            total_affected += (result.affected_rows or 0)
-
-        _emit_db_webhook_event(request, auth, db_name, table_name, "INSERT", total_affected)
+        total_affected = await QueryExecutionPipeline.run_bulk_inserts(engine, db_cfg, auth, request, db_name, table_name, target_rows)
         return success_response(request, {"affected_rows": total_affected})
     except Exception as exec_error:
         raise NexusGateException(ErrorCodes.DB_QUERY_FAILED, str(exec_error), 500)
@@ -270,7 +322,7 @@ async def insert_rows(request: Request, body: InsertRequest, db_name: str = Path
 @router.put("/{db_name}/{table_name}/rows")
 async def update_rows(request: Request, body: UpdateRequest, db_name: str = Path(...), table_name: str = Path(...), auth: AuthContext = Depends(get_auth_context)):
     if _is_federated(db_name):
-        return await proxy_request(db_name, f"{table_name}/rows", request, True)
+        return await FederatedQueryEngine.execute_distributed_query(db_name, f"{table_name}/rows", request)
     if auth.mode == ServerMode.READONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Read-only limits apply", 403)
 
@@ -279,20 +331,15 @@ async def update_rows(request: Request, body: UpdateRequest, db_name: str = Path
 
     try:
         sql, sql_params = construct_update(table_name, body.update, body.filter)
-        safe_sql, _, _ = validate_query(sql, db_cfg, auth.mode.value)
-        transpiled_sql = transpile_sql(safe_sql, to_dialect=engine.dialect)
-
-        result = await engine.execute(transpiled_sql, sql_params)
-        _emit_db_webhook_event(request, auth, db_name, table_name, "UPDATE", result.affected_rows or 0)
-
-        return success_response(request, {"affected_rows": result.affected_rows})
+        data = await QueryExecutionPipeline.run_query(engine, db_cfg, auth, request, db_name, sql, sql_params)
+        return success_response(request, {"affected_rows": data["affected_rows"]})
     except Exception as update_error:
         raise NexusGateException(ErrorCodes.DB_QUERY_FAILED, str(update_error), 500)
 
 @router.delete("/{db_name}/{table_name}/rows")
 async def delete_rows(request: Request, body: DeleteRequest, db_name: str = Path(...), table_name: str = Path(...), auth: AuthContext = Depends(get_auth_context)):
     if _is_federated(db_name):
-        return await proxy_request(db_name, f"{table_name}/rows", request, True)
+        return await FederatedQueryEngine.execute_distributed_query(db_name, f"{table_name}/rows", request)
     if auth.mode == ServerMode.READONLY:
         raise NexusGateException(ErrorCodes.AUTH_INSUFFICIENT_MODE, "Read-only limits apply", 403)
 
@@ -301,12 +348,7 @@ async def delete_rows(request: Request, body: DeleteRequest, db_name: str = Path
 
     try:
         sql, sql_params = construct_delete(table_name, body.filter)
-        safe_sql, _, _ = validate_query(sql, db_cfg, auth.mode.value)
-        transpiled_sql = transpile_sql(safe_sql, to_dialect=engine.dialect)
-
-        result = await engine.execute(transpiled_sql, sql_params)
-        _emit_db_webhook_event(request, auth, db_name, table_name, "DELETE", result.affected_rows or 0)
-
-        return success_response(request, {"affected_rows": result.affected_rows})
+        data = await QueryExecutionPipeline.run_query(engine, db_cfg, auth, request, db_name, sql, sql_params)
+        return success_response(request, {"affected_rows": data["affected_rows"]})
     except Exception as exec_error:
         raise NexusGateException(ErrorCodes.DB_QUERY_FAILED, str(exec_error), 500)

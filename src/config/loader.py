@@ -22,14 +22,16 @@ def _ensure_file_exists(path: str) -> None:
         logger.info("Config file not found, generating default.", path=path)
         generate_default_config(path)
 
-def _parse_toml_file(path: str) -> dict:
+def _parse_toml_file(path: str, exit_on_error: bool = True) -> dict:
     """Safely decodes raw disk bytes preventing corrupted config structures."""
     try:
         with open(path, "rb") as file:
             return tomllib.load(file)
     except tomllib.TOMLDecodeError as toml_error:
-        logger.error("Failed to parse config.toml syntax", error=str(toml_error))
-        sys.exit(1)
+        if exit_on_error:
+            logger.error("Failed to parse config.toml syntax", error=str(toml_error))
+            sys.exit(1)
+        raise toml_error
 
 def _validate_schema(config_dict: dict, path: str) -> NexusGateConfig:
     """Applies strict Pydantic parsing ensuring zero runtime mapping failures."""
@@ -80,13 +82,19 @@ class ConfigManager:
         if not cls._config_path:
             return
             
+        config_dir = os.path.dirname(os.path.abspath(cls._config_path))
+        target_file = os.path.basename(cls._config_path)
+        
         logger.info("Starting config watcher daemon", path=cls._config_path)
         
         try:
-            async for _ in awatch(cls._config_path):
-                logger.info("Config file modification detected, refreshing")
-                cls._handle_hot_reload()
-                
+            async for changes in awatch(config_dir):
+                for change, path in changes:
+                    if os.path.basename(path) == target_file:
+                        logger.info("Config file modification detected, refreshing")
+                        cls._handle_hot_reload()
+                        break
+                        
         except asyncio.CancelledError:
             logger.info("Config watcher daemon stopped gracefully")
 
@@ -94,7 +102,7 @@ class ConfigManager:
     def _handle_hot_reload(cls):
         """Attempts isolated validation bypass of new file state before replacing memory."""
         try:
-            new_payload = _parse_toml_file(cls._config_path)
+            new_payload = _parse_toml_file(cls._config_path, exit_on_error=False)
             new_validated = NexusGateConfig(**new_payload)
             
             # old_config = cls._config  # Accessible for diffing later if needed

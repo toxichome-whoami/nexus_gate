@@ -191,7 +191,7 @@ async def _handle_form_upload(request: Request, alias: str, scanner: UploadScann
         
     if form.get("action") == "chunk":
         upload_id, chunk_index = form.get("upload_id"), int(form.get("chunk_index"))
-        await ChunkedUploadManager.write_chunk(upload_id, chunk_index, form.get("chunk_hash"), await form.get("file").read())
+        await ChunkedUploadManager.write_chunk_stream(upload_id, chunk_index, form.get("chunk_hash"), form.get("file"))
         
         session = await ChunkedUploadManager.get_session(upload_id)
         return success_response(request, {

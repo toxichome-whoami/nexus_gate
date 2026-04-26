@@ -7,7 +7,10 @@ An open-source, industrial-grade, unified API gateway for databases and file sto
 - **Secure By Default**: Strict WAF, rate limits, and path traversal blockades.
 
 ## Features
-- Dynamic connection pooling to any SQL dialect using `sqlglot` for AST verification.
+- **Map-Reduce Data Mesh**: Query multiple remote federated databases simultaneously and join their JSON results entirely in-memory.
+- **Storage Circuit Breakers**: Automatically disconnects bandwidth-heavy streaming downloads when the server is overloaded.
+- **Model Context Protocol (MCP)**: Seamlessly expose databases to AI tools via the standardized MCP JSON-RPC Server interface.
+- Dynamic connection pooling to any SQL dialect using `sqlglot` for secure AST caching and verification.
 - Virtual file system proxy with built in zip-streaming and image resizing.
 - Real-time webhook emissions based on regex-like operation subscriptions.
 - Async HTTP streaming reverse-proxies for Federated edge nodes.

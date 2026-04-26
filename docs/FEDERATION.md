@@ -8,6 +8,7 @@ In a federated setup, a **Connector Server** (Client) proxies requests to a **Re
 
 **Key Features:**
 - **Unified API**: Access globally distributed data through a single URL.
+- **Map-Reduce Data Mesh**: Query a comma-separated list of nodes (`alias_a,alias_b`) to concurrently fetch and join remote JSON data entirely in-memory using `asyncio.gather`.
 - **Automatic Prefixing**: Remote resources are auto-prefixed with the node alias (e.g., `us_west_main_db`).
 - **Isolated Auth**: Federation uses its own dedicated secrets — completely separate from API keys.
 - **Per-Node Scoping**: Each incoming node has its own `mode`, `db_scope`, and `fs_scope`.

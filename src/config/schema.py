@@ -31,6 +31,7 @@ class FeaturesConfig(BaseModel):
     federation: bool = False
     metrics: bool = True
     playground: bool = False
+    mcp: bool = False
 
 class LoggingConfig(BaseModel):
     """Formats payload retention policies targeting physical disk operations."""
@@ -61,6 +62,11 @@ class CacheConfig(BaseModel):
     default_ttl: int = 60
     query_cache: bool = True
     fs_cache: bool = True
+
+class MCPConfig(BaseModel):
+    """Configuration for the Model Context Protocol (MCP) server."""
+    server_name: str = "nexusgate"
+    server_version: str = "1.0.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Dynamic Module Targets
@@ -170,6 +176,7 @@ class NexusGateConfig(BaseModel):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     cache: CacheConfig = Field(default_factory=CacheConfig)
+    mcp: MCPConfig = Field(default_factory=MCPConfig)
     webhooks: WebhookGlobalConfig = Field(default_factory=WebhookGlobalConfig)
     webhook: Dict[str, WebhookDefConfig] = Field(default_factory=dict)
     database: Dict[str, DatabaseDefConfig] = Field(default_factory=dict)
