@@ -13,7 +13,7 @@ Full reference for every key in `config.toml`. See `config.example.toml` for a r
 | `workers` | int | `0` | uvicorn workers (0 = auto) |
 | `max_connections` | int | `10000` | Max concurrent connections |
 | `request_timeout` | int | `30` | Request timeout in seconds |
-| `body_limit` | string | `"10mb"` | Max request body size |
+| `body_limit` | string | `"10 MB"` | Max request body size |
 | `tls_cert` | string | `""` | Path to TLS cert (blank = HTTP) |
 | `tls_key` | string | `""` | Path to TLS private key |
 | `allowed_ips` | list | `[]` | IPs exempt from rate limiting |
@@ -46,7 +46,7 @@ Feature flags to enable/disable entire subsystems.
 | `format` | `"json"` | `json \| pretty` |
 | `directory` | `"./logs"` | Log file output directory |
 | `file_prefix` | `"nexusgate"` | Log filename prefix |
-| `max_file_size` | `"50mb"` | Rotate when log exceeds this size |
+| `max_file_size` | `"50 MB"` | Rotate when log exceeds this size |
 | `max_files` | `5` | Max rotated log files to keep |
 | `stdout` | `true` | Also log to stdout |
 
@@ -73,7 +73,7 @@ Feature flags to enable/disable entire subsystems.
 | `enabled` | `true` | Enable caching |
 | `backend` | `"memory"` | `memory \| redis` |
 | `redis_url` | `""` | Redis URL |
-| `max_memory` | `"100mb"` | Memory cache size bound |
+| `max_memory` | `"100 MB"` | Memory cache size bound |
 | `default_ttl` | `60` | Default TTL in seconds |
 | `query_cache` | `true` | Cache DB query results |
 | `fs_cache` | `true` | Cache file metadata |
@@ -140,9 +140,9 @@ Per-webhook subscription definition.
 |-----|---------|-------------|
 | `path` | required | Absolute or relative root directory |
 | `mode` | `"readwrite"` | `readwrite \| readonly \| writeonly` |
-| `limit` | `"5gb"` | Maximum total storage size |
-| `chunk_size` | `"10mb"` | Default upload chunk size |
-| `max_file_size` | `"500mb"` | Max single file upload size |
+| `limit` | `"5 GB"` | Maximum total storage size |
+| `chunk_size` | `"10 MB"` | Default upload chunk size |
+| `max_file_size` | `"500 MB"` | Max single file upload size |
 | `allowed_extensions` | `[]` | Allowed extensions (empty = all) |
 | `blocked_extensions` | `[".exe",".bat",...]` | Blocked extensions |
 

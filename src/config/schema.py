@@ -15,7 +15,7 @@ class ServerConfig(BaseModel):
     workers: int = 0
     max_connections: int = 10000
     request_timeout: int = 30
-    body_limit: str = "10mb"
+    body_limit: str = "10 MB"
     tls_cert: str = ""
     tls_key: str = ""
     allowed_ips: List[str] = Field(default_factory=list)
@@ -39,7 +39,7 @@ class LoggingConfig(BaseModel):
     format: Literal["json", "pretty"] = "json"
     directory: str = "./logs"
     file_prefix: str = "nexusgate"
-    max_file_size: str = "50mb"
+    max_file_size: str = "50 MB"
     max_files: int = 5
     stdout: bool = True
 
@@ -58,7 +58,7 @@ class CacheConfig(BaseModel):
     enabled: bool = True
     backend: Literal["memory", "redis", "sqlite"] = "memory"
     redis_url: str = ""
-    max_memory: str = "100mb"
+    max_memory: str = "100 MB"
     default_ttl: int = 60
     query_cache: bool = True
     fs_cache: bool = True
@@ -109,11 +109,11 @@ class DatabaseDefConfig(BaseModel):
 class StorageDefConfig(BaseModel):
     path: str
     mode: ServerMode = ServerMode.READWRITE
-    limit: str = "5gb"
-    chunk_size: str = "10mb"
+    limit: str = "5 GB"
+    chunk_size: str = "10 MB"
     allowed_extensions: List[str] = Field(default_factory=list)
     blocked_extensions: List[str] = Field(default_factory=lambda: [".exe", ".bat", ".sh", ".cmd", ".ps1"])
-    max_file_size: str = "500mb"
+    max_file_size: str = "500 MB"
     access: List[str] = Field(default_factory=lambda: ["*"])
 
 class ApiKeyDefConfig(BaseModel):

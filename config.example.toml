@@ -10,7 +10,7 @@ port = 4500
 workers = 0                     # 0 = auto-detect (CPUs * 2 + 1)
 max_connections = 10000
 request_timeout = 30            # Seconds
-body_limit = "10mb"
+body_limit = "10 MB"
 tls_cert = ""                   # Path to TLS cert file. Leave blank to disable TLS.
 tls_key = ""                    # Path to TLS private key file.
 allowed_ips = []                # IPs exempt from rate limiting (e.g. ["127.0.0.1"])
@@ -39,7 +39,7 @@ level = "INFO"            # TRACE | DEBUG | INFO | WARN | ERROR
 format = "json"           # json | pretty
 directory = "./logs"
 file_prefix = "nexusgate"
-max_file_size = "50mb"
+max_file_size = "50 MB"
 max_files = 5
 stdout = true
 
@@ -58,7 +58,7 @@ penalty_cooldown = 300 # Seconds to ban after 10 consecutive violations
 enabled = true
 backend = "memory"   # memory | redis
 redis_url = ""
-max_memory = "100mb"
+max_memory = "100 MB"
 default_ttl = 60     # Seconds
 query_cache = true
 fs_cache = true
@@ -127,18 +127,18 @@ dangerous_operations = false
 [storage.uploads]
 path = "./storage/uploads"
 mode = "readwrite"
-limit = "10gb"
-chunk_size = "10mb"
-max_file_size = "500mb"
+limit = "10 GB"
+chunk_size = "10 MB"
+max_file_size = "500 MB"
 allowed_extensions = []                                      # [] = all allowed
 blocked_extensions = [".exe", ".bat", ".sh", ".cmd", ".ps1"]
 
 [storage.assets]
 path = "./storage/assets"
 mode = "readonly"
-limit = "5gb"
-chunk_size = "10mb"
-max_file_size = "100mb"
+limit = "5 GB"
+chunk_size = "10 MB"
+max_file_size = "100 MB"
 
 # ─── Webhooks ─────────────────────────────────
 # Rule format: module.operation@alias:target
