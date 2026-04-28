@@ -20,7 +20,7 @@ def _get_directory_count(path: str) -> int:
 
 def _enrich_file_metrics(stat, path: str, res: dict) -> None:
     """Attaches human-readable structures for explicit file nodes natively."""
-    res["size_human"] = format_size(stat.st_size)
+    res["size"] = [stat.st_size, format_size(stat.st_size)]
     mime, _ = mimetypes.guess_type(path)
     res["mime_type"] = mime or "application/octet-stream"
 
@@ -38,7 +38,6 @@ async def get_file_info(path: str) -> Dict[str, Any]:
     res = {
         "name": os.path.basename(path),
         "type": "directory" if is_dir else "file",
-        "size": stat.st_size if not is_dir else None,
         "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
         "created": datetime.fromtimestamp(stat.st_ctime).isoformat()
     }

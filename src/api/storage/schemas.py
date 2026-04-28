@@ -5,8 +5,7 @@ from datetime import datetime
 class StorageItem(BaseModel):
     name: str
     type: Literal["file", "directory"]
-    size: Optional[int] = None
-    size_human: Optional[str] = None
+    size: Optional[Any] = None  # [bytes, "human readable"] for files, None for dirs
     mime_type: Optional[str] = None
     modified: Optional[str] = None
     created: Optional[str] = None
