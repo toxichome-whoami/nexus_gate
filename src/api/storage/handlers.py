@@ -331,15 +331,40 @@ async def list_storages(request: Request, auth: AuthContext = Depends(get_auth_c
     return success_response(request, {"storages": storages})
 
 @router.get("/{alias}/list")
-async def list_folder(request: Request, alias: str = Path(...), path: str = Query("/"), recursive: bool = Query(False), auth: AuthContext = Depends(get_auth_context)):
+async def list_folder(request: Request, alias: str = Path(...), path: str = Query("/"), recursive: bool = Query(False), limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0), auth: AuthContext = Depends(get_auth_context)):
     if _is_federated(alias): return await proxy_request(alias, f"list", request, False)
 
     target_path = _get_storage_path(alias, path, auth)
     if not os.path.exists(target_path): raise NexusGateException(ErrorCodes.FS_PATH_NOT_FOUND, f"Missing Node", 404)
     if not os.path.isdir(target_path): raise NexusGateException(ErrorCodes.FS_PATH_NOT_FOUND, "Path rejects dict schema.", 400)
 
-    items = [await get_file_info(os.path.join(target_path, item)) for item in os.listdir(target_path)]
-    return success_response(request, {"storage": alias, "path": path, "items": items})
+    # Use os.scandir for better performance, but fallback to sorting listdir
+    try:
+        all_items = os.listdir(target_path)
+    except Exception as e:
+        raise NexusGateException(ErrorCodes.SERVER_INTERNAL, f"Failed to list directory: {str(e)}", 500)
+        
+    total_items = len(all_items)
+    
+    # Sort for consistent pagination
+    all_items.sort()
+    
+    # Slice the page
+    page_items = all_items[offset:offset + limit]
+
+    items = [await get_file_info(os.path.join(target_path, item)) for item in page_items]
+    
+    return success_response(request, {
+        "storage": alias, 
+        "path": path, 
+        "items": items,
+        "pagination": {
+            "total": total_items,
+            "limit": limit,
+            "offset": offset,
+            "has_more": (offset + limit) < total_items
+        }
+    })
 
 @router.get("/{alias}/download")
 async def download_file(request: Request, alias: str = Path(...), path: str = Query(...), inline: bool = Query(False), width: Optional[int] = Query(None), height: Optional[int] = Query(None), format: Optional[str] = Query(None), auth: AuthContext = Depends(get_auth_context)):

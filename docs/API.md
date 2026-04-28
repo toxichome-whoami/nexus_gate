@@ -134,11 +134,61 @@ curl -X DELETE "http://localhost:4500/api/v1/db/main_db/users/rows" \
 curl -X GET "http://localhost:4500/api/v1/fs/storages" \
      -H "Authorization: Bearer <TOKEN>"
 ```
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "storages": [
+      {
+        "name": "uploads",
+        "mode": "readwrite",
+        "status": "available",
+        "limit": "10 GB",
+        "chunk_size": "10 MB",
+        "max_file_size": "500 MB",
+        "federated": false,
+        "usage": {
+          "used_bytes": [104857600, "100.00 MB"],
+          "available_bytes": [10632560640, "9.90 GB"],
+          "file_count": 42
+        }
+      }
+    ]
+  }
+}
+```
 
 ### 2. List Folder
 ```bash
-curl -X GET "http://localhost:4500/api/v1/fs/local_fs/list?path=/subfolder" \
+curl -X GET "http://localhost:4500/api/v1/fs/local_fs/list?path=/subfolder&limit=50&offset=0" \
      -H "Authorization: Bearer <TOKEN>"
+```
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "storage": "local_fs",
+    "path": "/subfolder",
+    "items": [
+      {
+        "name": "image.png",
+        "type": "file",
+        "size": [2457600, "2.34 MB"],
+        "mime_type": "image/png",
+        "modified": "2026-04-28T10:30:00",
+        "created": "2026-04-28T08:00:00"
+      }
+    ],
+    "pagination": {
+      "total": 150,
+      "limit": 50,
+      "offset": 0,
+      "has_more": true
+    }
+  }
+}
 ```
 
 ### 3. Download File or Folder
@@ -249,8 +299,7 @@ curl -X POST "http://localhost:4500/api/v1/fs/local_fs/action" \
     "info": {
       "name": "Q1.pdf",
       "type": "file",
-      "size": 2457600,
-      "size_human": "2.34 MB",
+      "size": [2457600, "2.34 MB"],
       "mime_type": "application/pdf",
       "modified": "2026-03-15T10:30:00",
       "created": "2026-03-01T08:00:00"
