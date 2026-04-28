@@ -62,3 +62,14 @@ def format_size(size_in_bytes: int) -> str:
         current_value /= 1024.0
         
     return f"{current_value:.2f} PB"
+
+
+def normalize_size(size_str: str) -> str:
+    """
+    Normalizes any size string into clean human-readable format.
+    Example: '1gb' -> '1 GB', '10mb' -> '10 MB', '1.5 GB' -> '1.50 GB'
+    """
+    try:
+        return format_size(parse_size(size_str))
+    except (ValueError, TypeError):
+        return size_str

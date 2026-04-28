@@ -11,7 +11,7 @@ from typing import Optional
 
 from config.loader import ConfigManager
 from utils.types import AuthContext, ServerMode
-from utils.size_parser import parse_size, format_size
+from utils.size_parser import parse_size, format_size, normalize_size
 from server.middleware.auth import get_auth_context
 from api.responses import success_response
 from api.errors import NexusGateException, ErrorCodes
@@ -87,9 +87,9 @@ def _append_remote_storages(alias: str, remote_payload: list, remote_storages_ma
         remote_storages_map[fs_name] = {
             "status": health_status.get("status", "available") if isinstance(health_status, dict) else health_status,
             "mode": fs.get("mode", "proxy"),
-            "limit": fs.get("limit", "10GB"),
-            "chunk_size": fs.get("chunk_size", "10MB"),
-            "max_file_size": fs.get("max_file_size", "100MB"),
+            "limit": normalize_size(fs.get("limit", "10 GB")),
+            "chunk_size": normalize_size(fs.get("chunk_size", "10 MB")),
+            "max_file_size": normalize_size(fs.get("max_file_size", "100 MB")),
         }
 
 async def _fetch_remote_storages(alias: str, server_state: dict, active_storages: list, auth: AuthContext):
@@ -120,9 +120,9 @@ async def _fetch_remote_storages(alias: str, server_state: dict, active_storages
             "name": federated_name,
             "mode": info.get("mode", "proxy") if is_dict else "proxy",
             "status": "available" if (info.get("status", "available") if is_dict else info) == "up" else (info.get("status") if is_dict else info),
-            "limit": info.get("limit", "10GB") if is_dict else "10GB",
-            "chunk_size": info.get("chunk_size", "10MB") if is_dict else "10MB",
-            "max_file_size": info.get("max_file_size", "100MB") if is_dict else "100MB",
+            "limit": normalize_size(info.get("limit", "10 GB") if is_dict else "10 GB"),
+            "chunk_size": normalize_size(info.get("chunk_size", "10 MB") if is_dict else "10 MB"),
+            "max_file_size": normalize_size(info.get("max_file_size", "100 MB") if is_dict else "100 MB"),
             "federated": True,
             "remote_server": alias,
         })
@@ -319,8 +319,8 @@ async def list_storages(request: Request, auth: AuthContext = Depends(get_auth_c
             storages.append({
                 "name": name, "mode": storage_cfg.mode.value,
                 "status": "available" if os.path.exists(storage_cfg.path) else "unavailable",
-                "limit": storage_cfg.limit, "chunk_size": storage_cfg.chunk_size,
-                "max_file_size": storage_cfg.max_file_size, "federated": False,
+                "limit": normalize_size(storage_cfg.limit), "chunk_size": normalize_size(storage_cfg.chunk_size),
+                "max_file_size": normalize_size(storage_cfg.max_file_size), "federated": False,
                 "usage": usage
             })
 
