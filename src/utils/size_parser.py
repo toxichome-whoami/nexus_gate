@@ -22,25 +22,25 @@ SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"]
 def parse_size(size_str: str) -> int:
     """
     Parses a human readable size notation into an exact byte count.
-    Example: '10mb' -> 10485760
+    Example: '10mb' -> 10485760, '1.5 GB' -> 1610612736
     """
     if not isinstance(size_str, str):
         return int(size_str)
         
-    normalized_str = size_str.lower().strip()
+    normalized_str = ''.join(size_str.lower().split())
     
     # Fast path for purely numeric un-suffixed values
-    if normalized_str.isdigit():
-        return int(normalized_str)
+    if normalized_str.isdigit() or (normalized_str.count('.') == 1 and normalized_str.replace('.', '').isdigit()):
+        return int(float(normalized_str))
         
-    match = re.match(r'^(\d+)(b|kb|mb|gb|tb|pb)$', normalized_str)
+    match = re.match(r'^([\d\.]+)(b|kb|mb|gb|tb|pb)$', normalized_str)
     if not match:
         raise ValueError(f"Invalid size format: {size_str}")
         
-    scalar_value = int(match.group(1))
+    scalar_value = float(match.group(1))
     unit_suffix = match.group(2)
     
-    return scalar_value * UNIT_MULTIPLIERS[unit_suffix]
+    return int(scalar_value * UNIT_MULTIPLIERS[unit_suffix])
 
 
 def format_size(size_in_bytes: int) -> str:
