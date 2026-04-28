@@ -75,4 +75,10 @@ async def lifespan(app: FastAPI):
     await _stop_background_daemons(active_daemons)
     await DatabasePoolManager.shutdown()
     
+    # 4. Teardown HTTP Clients
+    if hasattr(app.state, "http_clients"):
+        logger.info("Closing internal HTTP connection pools")
+        for client in app.state.http_clients.values():
+            await client.aclose()
+            
     logger.info("Shutdown sequence fully completed")

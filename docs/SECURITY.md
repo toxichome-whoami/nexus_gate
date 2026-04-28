@@ -36,7 +36,7 @@ All three paths use Base64 encoding for transport, but the raw secrets are store
 |--------|----------------------|
 | **SQL Injection** | Mandatory use of `sqlglot` for AST-based parsing and validation. Parameterized queries are enforced; string interpolation is mathematically impossible in the data layer. |
 | **Path Traversal** | Comprehensive `../` and null-byte filtering in the `WAFMiddleware`. All file paths are canonicalized and jailed within the storage volume root. |
-| **Brute Force** | Multi-tier sliding-window rate limiting (Global, Per-Key, Per-IP) with a penalty cooldown that bans repeated violators. |
+| **Brute Force** | Multi-tier fixed-window rate limiting (Global, Per-Key, Per-IP) with a penalty cooldown that bans repeated violators. The in-memory backend uses an **O(1) flat counter+expiry pattern per IP** — RAM usage is constant regardless of attack volume (no growing timestamp lists). |
 | **Timing Attacks** | All secret comparisons (API keys, federation secrets, webhook tokens) use `hmac.compare_digest` (constant-time). |
 | **SSRF (Server-Side Request Forgery)** | The Federation proxy employs a strict Bogon/Localhost IP validator to ensure outbound network connections cannot be manipulated into routing to internal AWS metadata IPs or local resources. |
 | **Denial of Service (DoS)** | Protected via `CircuitBreaker` states linked to large Storage stream outputs. Additionally, all chunked file uploads bypass RAM by writing directly to disk via streaming sockets, neutralizing Out-Of-Memory (OOM) memory exhaustion attacks. |
@@ -71,5 +71,5 @@ Mutating requests (`POST`, `PUT`, `DELETE`) can be made idempotent by providing 
 - **Unique Secrets**: Never reuse the same secret across different federation nodes or webhooks.
 - **Redaction**: Avoid enabling `features.playground` in public production environments.
 - **Log Rotation**: Ensure `logging.directory` is on a partition with sufficient space to prevent service denial due to disk exhaustion.
-- **Rate Limit Penalties**: While admin-issued bans are permanently stored in SQLite, temporary IP penalties issued automatically by the rate limiter use the cache backend. Use a Redis backend for rate limiting if you require penalty persistence across load-balanced workers or container restarts.
+- **Rate Limit Penalties**: While admin-issued bans are permanently stored in SQLite, temporary IP penalties issued automatically by the rate limiter use the cache backend. Use a Redis backend for rate limiting if you require penalty persistence across load-balanced workers or container restarts. The in-memory backend stores exactly 2 keys per tracked IP (`count` + `expiry`) — safe to use under high-concurrency DDoS without memory growth.
 

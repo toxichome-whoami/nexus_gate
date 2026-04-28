@@ -118,6 +118,7 @@ Call `GET /api/federation/servers` (requires `full_admin` API key) to see:
 - **Circuit Breaker**: Each federation link is protected. If a remote node goes down, it returns `FED_CIRCUIT_OPEN` immediately instead of waiting for timeouts.
 - **Health Syncing**: The connector periodically pings remote servers. Unhealthy servers have their resources temporarily hidden.
 - **Timeouts**: Federation requests have their own timeout to prevent slow remotes from exhausting connection pools.
+- **Connection Pool Lifecycle**: `httpx.AsyncClient` instances are stored in `app.state.http_clients` (keyed by TLS trust mode). They are lazily initialized on first use, reused across all requests within the same process, and **cleanly closed during server shutdown** via the `lifespan` teardown hook — preventing dangling sockets or resource leaks when restarting or redeploying.
 
 ## 7. Security
 

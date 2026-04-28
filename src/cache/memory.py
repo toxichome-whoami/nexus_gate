@@ -96,22 +96,31 @@ class MemoryCache:
 
     @classmethod
     async def check_rate_limit(cls, limits_key: str, window: int, limit: int, penalty_key: str, burst: int, penalty_cooldown: int) -> tuple[bool, int]:
-        """Atomically evaluates sliding limits executing single-thread async locks."""
+        """Atomically evaluates limits using a flat counter+expiry pattern — O(1) memory per IP regardless of attack volume."""
         now = time.time()
-        window_start = now - window
         cache = cls.get_cache()
-        
+
         async with cls._lock:
+            # Fast-path: IP already hard-banned
             if penalty_key in cache:
                 return True, limit + 1
-            
-            history = cache.get(limits_key, [])
-            history = [ts for ts in history if ts > window_start]
-            
-            if len(history) >= limit + burst:
+
+            count_key = f"{limits_key}:count"
+            expiry_key = f"{limits_key}:expiry"
+
+            count = cache.get(count_key, 0)
+            expiry = cache.get(expiry_key, 0.0)
+
+            # Window expired — reset counter
+            if now > expiry:
+                count = 0
+                cache[expiry_key] = now + window
+
+            count += 1
+            cache[count_key] = count
+
+            if count > limit + burst:
                 _apply_penalty_violation(cache, limits_key, penalty_key)
-                return True, len(history)
-            
-            history.append(now)
-            cache[limits_key] = history
-            return False, len(history)
+                return True, count
+
+            return False, count

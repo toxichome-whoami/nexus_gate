@@ -90,53 +90,56 @@ async def _send_rejection_response(send: Send, limit: int, window: int):
 
 class RateLimitMiddleware:
     """Stateful ASGI middleware bridging cached sliding-window limits."""
+    __slots__ = ("app", "_backend", "_enabled", "_allowed_ips", "_window", "_burst", "_penalty_cooldown")
 
     def __init__(self, app: ASGIApp):
         self.app = app
-
-    async def get_backend(self):
-        """Resolves the cache backend strategy dynamically."""
+        # Resolve config and backend class ONCE at startup - never per-request
         config = ConfigManager.get()
+        self._enabled = config.rate_limit.enabled
+        self._allowed_ips = config.server.allowed_ips
+        self._window = config.rate_limit.window
+        self._burst = config.rate_limit.burst
+        self._penalty_cooldown = config.rate_limit.penalty_cooldown
         if config.rate_limit.backend == "redis":
-            return RedisCache
-        if config.rate_limit.backend == "sqlite":
-            return SQLiteCache
-        return MemoryCache
-        
+            self._backend = RedisCache
+        elif config.rate_limit.backend == "sqlite":
+            self._backend = SQLiteCache
+        else:
+            self._backend = MemoryCache
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Core ASGI entrypoint processing the event loop injection."""
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
 
-        config = ConfigManager.get()
-        if not config.rate_limit.enabled:
+        if not self._enabled:
             return await self.app(scope, receive, send)
+
+        config = ConfigManager.get()
 
         headers = dict(scope.get("headers", []))
         client_ip = _resolve_client_ip(scope, headers)
 
-        if client_ip in config.server.allowed_ips:
+        if client_ip in self._allowed_ips:
             return await self.app(scope, receive, send)
 
         api_key_name = _resolve_api_key_name(headers)
         
         limit = _determine_effective_limits(api_key_name, config)
-        window = config.rate_limit.window
         
-        # Dispatch to async backend logic
-        cache = await self.get_backend()
-        
-        violated, current_count = await cache.check_rate_limit(
+        # Use pre-cached backend class - no per-request resolution
+        violated, current_count = await self._backend.check_rate_limit(
             limits_key=f"rl:ip:{client_ip}:key:{api_key_name}",
-            window=window,
+            window=self._window,
             limit=limit,
             penalty_key=f"penalty:{client_ip}",
-            burst=config.rate_limit.burst,
-            penalty_cooldown=config.rate_limit.penalty_cooldown
+            burst=self._burst,
+            penalty_cooldown=self._penalty_cooldown
         )
         
         if violated:
-            return await _send_rejection_response(send, limit, window)
+            return await _send_rejection_response(send, limit, self._window)
             
         async def send_wrapper(message: Message) -> None:
             """Injected hook wrapping the final request phase to enforce header attachments."""
@@ -144,7 +147,7 @@ class RateLimitMiddleware:
                 resp_headers = message.setdefault("headers", [])
                 resp_headers.append((b"x-ratelimit-limit", str(limit).encode("ascii")))
                 resp_headers.append((b"x-ratelimit-remaining", str(max(0, limit - current_count)).encode("ascii")))
-                resp_headers.append((b"x-ratelimit-reset", str(int(time.time() + window)).encode("ascii")))
+                resp_headers.append((b"x-ratelimit-reset", str(int(time.time() + self._window)).encode("ascii")))
             await send(message)
 
         # Allow execution downward

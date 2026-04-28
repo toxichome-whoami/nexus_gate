@@ -9,15 +9,15 @@ from starlette.background import BackgroundTask
 from config.loader import ConfigManager
 from api.errors import NexusGateException, ErrorCodes
 
-# Shared clients (one per trust mode)
-_clients: dict = {}
-
-def get_proxy_client(verify_ssl: bool = True) -> httpx.AsyncClient:
-    """Manages globally persistent proxy connections mapping trust states."""
-    global _clients
-    if verify_ssl not in _clients:
-        _clients[verify_ssl] = httpx.AsyncClient(timeout=30.0, verify=verify_ssl)
-    return _clients[verify_ssl]
+def get_proxy_client(request: Request, verify_ssl: bool = True) -> httpx.AsyncClient:
+    """Manages globally persistent proxy connections mapping trust states attached to the ASGI app."""
+    if not hasattr(request.app.state, "http_clients"):
+        request.app.state.http_clients = {}
+        
+    clients = request.app.state.http_clients
+    if verify_ssl not in clients:
+        clients[verify_ssl] = httpx.AsyncClient(timeout=30.0, verify=verify_ssl)
+    return clients[verify_ssl]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Proxy Request Builders
@@ -109,7 +109,7 @@ async def proxy_request(alias: str, path: str, request: Request, is_database: bo
 
             headers = _build_proxy_headers(request, srv_config)
 
-            client = get_proxy_client(srv_config.trust_mode == "verify")
+            client = get_proxy_client(request, srv_config.trust_mode == "verify")
             return await _stream_proxy_execution(client, request, remote_url, headers)
 
     resource_type = "Database" if is_database else "Storage"
