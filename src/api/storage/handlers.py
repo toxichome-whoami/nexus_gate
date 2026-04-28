@@ -11,7 +11,7 @@ from typing import Optional
 
 from config.loader import ConfigManager
 from utils.types import AuthContext, ServerMode
-from utils.size_parser import parse_size
+from utils.size_parser import parse_size, format_size
 from server.middleware.auth import get_auth_context
 from api.responses import success_response
 from api.errors import NexusGateException, ErrorCodes
@@ -254,19 +254,76 @@ async def _handle_json_upload(request: Request, alias: str, scanner: UploadScann
     raise NexusGateException(ErrorCodes.INPUT_SCHEMA_INVALID, "Invalid block definition", 400)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Core Web Handlers
+# Storage Usage (threadpool + TTL cache)
 # ─────────────────────────────────────────────────────────────────────────────
+
+_usage_cache: dict = {}  # {path: (timestamp, result)}
+_USAGE_CACHE_TTL = 30    # seconds — avoid rescanning disk on every request
+
+def _scan_directory_sync(storage_path: str) -> tuple[int, int]:
+    """Synchronous scandir walk — runs inside a threadpool, never blocks the event loop."""
+    total_bytes = 0
+    file_count = 0
+    stack = [storage_path]
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_file(follow_symlinks=False):
+                            total_bytes += entry.stat(follow_symlinks=False).st_size
+                            file_count += 1
+                        elif entry.is_dir(follow_symlinks=False):
+                            stack.append(entry.path)
+                    except (OSError, PermissionError):
+                        continue
+        except (OSError, PermissionError):
+            continue
+    return total_bytes, file_count
+
+async def _calculate_storage_usage(storage_path: str, limit_str: str) -> dict:
+    """Calculates real disk usage for a storage volume. Cached for 30s, scanned in a threadpool."""
+    import time as _time
+    
+    now = _time.monotonic()
+    cached = _usage_cache.get(storage_path)
+    if cached and (now - cached[0]) < _USAGE_CACHE_TTL:
+        return cached[1]
+    
+    if not os.path.exists(storage_path):
+        result = {"used_bytes": 0, "used": "0 B", "available_bytes": 0, "available": "0 B", "file_count": 0}
+        _usage_cache[storage_path] = (now, result)
+        return result
+    
+    # Offload blocking I/O to the default threadpool
+    total_bytes, file_count = await asyncio.to_thread(_scan_directory_sync, storage_path)
+    
+    limit_bytes = parse_size(limit_str) if limit_str else 0
+    available_bytes = max(0, limit_bytes - total_bytes) if limit_bytes > 0 else 0
+    
+    result = {
+        "used_bytes": total_bytes,
+        "used": format_size(total_bytes),
+        "available_bytes": available_bytes,
+        "available": format_size(available_bytes) if limit_bytes > 0 else "unlimited",
+        "file_count": file_count,
+    }
+    _usage_cache[storage_path] = (now, result)
+    return result
 
 @router.get("/storages")
 async def list_storages(request: Request, auth: AuthContext = Depends(get_auth_context)):
     config, storages = ConfigManager.get(), []
     for name, storage_cfg in config.storage.items():
         if "*" in auth.fs_scope or name in auth.fs_scope:
+            usage = await _calculate_storage_usage(storage_cfg.path, storage_cfg.limit)
             storages.append({
                 "name": name, "mode": storage_cfg.mode.value,
                 "status": "available" if os.path.exists(storage_cfg.path) else "unavailable",
                 "limit": storage_cfg.limit, "chunk_size": storage_cfg.chunk_size,
-                "max_file_size": storage_cfg.max_file_size, "federated": False
+                "max_file_size": storage_cfg.max_file_size, "federated": False,
+                **usage
             })
 
     if config.features.federation and config.federation.enabled:
