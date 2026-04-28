@@ -292,7 +292,7 @@ async def _calculate_storage_usage(storage_path: str, limit_str: str) -> dict:
         return cached[1]
     
     if not os.path.exists(storage_path):
-        result = {"used_bytes": 0, "used": "0 B", "available_bytes": 0, "available": "0 B", "file_count": 0}
+        result = {"used_bytes": [0, "0 B"], "available_bytes": [0, "0 B"], "file_count": 0}
         _usage_cache[storage_path] = (now, result)
         return result
     
@@ -303,10 +303,8 @@ async def _calculate_storage_usage(storage_path: str, limit_str: str) -> dict:
     available_bytes = max(0, limit_bytes - total_bytes) if limit_bytes > 0 else 0
     
     result = {
-        "used_bytes": total_bytes,
-        "used": format_size(total_bytes),
-        "available_bytes": available_bytes,
-        "available": format_size(available_bytes) if limit_bytes > 0 else "unlimited",
+        "used_bytes": [total_bytes, format_size(total_bytes)],
+        "available_bytes": [available_bytes, format_size(available_bytes)] if limit_bytes > 0 else [0, "unlimited"],
         "file_count": file_count,
     }
     _usage_cache[storage_path] = (now, result)
@@ -323,7 +321,7 @@ async def list_storages(request: Request, auth: AuthContext = Depends(get_auth_c
                 "status": "available" if os.path.exists(storage_cfg.path) else "unavailable",
                 "limit": storage_cfg.limit, "chunk_size": storage_cfg.chunk_size,
                 "max_file_size": storage_cfg.max_file_size, "federated": False,
-                **usage
+                "usage": usage
             })
 
     if config.features.federation and config.federation.enabled:
