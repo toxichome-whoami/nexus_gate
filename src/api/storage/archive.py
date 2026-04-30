@@ -1,7 +1,7 @@
 import os
 
-import zipstream
 from fastapi.responses import StreamingResponse
+from zipstream.ng import ZipStream
 
 from api.errors import ErrorCodes, NexusGateException
 
@@ -11,7 +11,7 @@ from api.errors import ErrorCodes, NexusGateException
 
 
 def _append_folder_to_zip(
-    z: zipstream.ZipStream, folder_path: str, root: str, files: list
+    z: ZipStream, folder_path: str, root: str, files: list
 ) -> None:
     """Traverses leaf nodes executing individual compress injections cleanly."""
     for file in files:
@@ -20,9 +20,9 @@ def _append_folder_to_zip(
         z.add_path(full_path, arcname=rel_path)
 
 
-def _generate_zip_stream(folder_path: str) -> zipstream.ZipStream:
+def _generate_zip_stream(folder_path: str) -> ZipStream:
     """Walks directory paths building archive metadata."""
-    z = zipstream.ZipStream()
+    z = ZipStream()
     for root, dirs, files in os.walk(folder_path):
         _append_folder_to_zip(z, folder_path, root, files)
     return z
