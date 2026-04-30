@@ -71,6 +71,10 @@ def _emit_db_webhook_event(
     affected_rows: int,
 ):
     """Transmits real-time mutation state via isolated webhooks."""
+    config = ConfigManager.get()
+    if not config.features.webhook or not config.webhooks.enabled:
+        return
+
     trigger_context = WebhookTrigger(
         api_key=auth.api_key_name,
         ip=request.client.host if request.client else "",
@@ -260,22 +264,30 @@ class QueryExecutionPipeline:
         safe_sql, operations, target_table = validate_query(
             sql, db_cfg, auth.mode.value
         )
-        transpiled_sql = transpile_sql(safe_sql, to_dialect=engine.dialect)
+        # Skip transpilation when source matches target dialect — pure CPU waste
+        if engine.dialect != "mysql" and engine.dialect != "mariadb":
+            transpiled_sql = transpile_sql(safe_sql, to_dialect=engine.dialect)
+        else:
+            transpiled_sql = safe_sql
 
         result = await engine.execute(transpiled_sql, params)
-        webhook_action = (
-            "SELECT"
-            if operations in ("select", "show", "describe")
-            else operations.upper()
-        )
-        _emit_db_webhook_event(
-            request,
-            auth,
-            db_name,
-            target_table,
-            webhook_action,
-            result.affected_rows or 0,
-        )
+
+        # Fast-path: skip webhook entirely when feature is disabled
+        config = ConfigManager.get()
+        if config.features.webhook and config.webhooks.enabled:
+            webhook_action = (
+                "SELECT"
+                if operations in ("select", "show", "describe")
+                else operations.upper()
+            )
+            _emit_db_webhook_event(
+                request,
+                auth,
+                db_name,
+                target_table,
+                webhook_action,
+                result.affected_rows or 0,
+            )
 
         return {
             "columns": result.columns,
