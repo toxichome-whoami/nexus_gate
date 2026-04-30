@@ -6,7 +6,7 @@ Every tool resolves engines through this class instead of touching the pool dire
 """
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List
 
 from mcp.types import TextContent
 
