@@ -4,25 +4,10 @@ from typing import Any, Dict, Optional
 from fastapi import Request
 
 from config.loader import ConfigManager
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-_SERVER_VERSION = "1.0.2"
-_SERVER_HOST_CACHE: Optional[str] = None
+from utils.types import ErrorDetails, RequestMeta, ResponseEnvelope
 
 
-def _get_server_name() -> str:
-    """Cached server name to avoid ConfigManager.get() on every response."""
-    global _SERVER_HOST_CACHE
-    if _SERVER_HOST_CACHE is None:
-        _SERVER_HOST_CACHE = ConfigManager.get().server.host
-    return _SERVER_HOST_CACHE
-
-
-def _build_meta(request: Request, start_time: Optional[float] = None) -> Dict[str, Any]:
-    """Build response metadata as a plain dict — no Pydantic overhead."""
+def _get_meta(request: Request, start_time: Optional[float] = None) -> RequestMeta:
     st = (
         start_time
         if start_time is not None
@@ -33,13 +18,15 @@ def _build_meta(request: Request, start_time: Optional[float] = None) -> Dict[st
 
     duration_ms = (time.perf_counter() - st) * 1000
 
-    return {
-        "request_id": getattr(request.state, "request_id", "-"),
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
-        "duration_ms": round(duration_ms, 2),
-        "server": _get_server_name(),
-        "version": _SERVER_VERSION,
-    }
+    server_name = ConfigManager.get().server.host
+
+    return RequestMeta(
+        request_id=getattr(request.state, "request_id", "-"),
+        timestamp=time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
+        duration_ms=round(duration_ms, 2),
+        server=server_name,
+        version="1.0.2",
+    )
 
 
 def success_response(
@@ -47,16 +34,12 @@ def success_response(
     data: Any,
     links: Optional[Dict[str, str]] = None,
     start_time: Optional[float] = None,
-) -> Dict[str, Any]:
-    """Fast response builder — plain dict, zero Pydantic allocation."""
-    resp = {
-        "success": True,
-        "data": data,
-        "meta": _build_meta(request, start_time),
-    }
-    if links:
-        resp["links"] = links
-    return resp
+) -> dict:
+    meta = _get_meta(request, start_time)
+
+    return ResponseEnvelope(success=True, data=data, meta=meta, links=links).model_dump(
+        exclude_none=True
+    )
 
 
 def error_response(
@@ -65,14 +48,11 @@ def error_response(
     message: str,
     details: Optional[Any] = None,
     start_time: Optional[float] = None,
-) -> Dict[str, Any]:
-    """Fast error response builder — plain dict, zero Pydantic allocation."""
-    error = {"code": error_code, "message": message}
-    if details is not None:
-        error["details"] = details
+) -> dict:
+    meta = _get_meta(request, start_time)
 
-    return {
-        "success": False,
-        "error": error,
-        "meta": _build_meta(request, start_time),
-    }
+    return ResponseEnvelope(
+        success=False,
+        error=ErrorDetails(code=error_code, message=message, details=details),
+        meta=meta,
+    ).model_dump(exclude_none=True)
