@@ -5,6 +5,7 @@ Provides a contextvars-based mechanism to propagate authenticated
 identity from the SSE/message endpoints into tool and resource handlers.
 This is necessary because the MCP SDK bypasses FastAPI's Depends() injection.
 """
+
 from __future__ import annotations
 
 import contextvars

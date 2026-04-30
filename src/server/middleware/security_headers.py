@@ -31,8 +31,10 @@ _DOCS_HEADERS: tuple = (
 
 _DOCS_PREFIXES = ("/api/docs", "/api/spec", "/docs", "/redoc")
 
+
 class SecurityHeadersMiddleware:
     """ASGIMiddleware to add security headers to every response."""
+
     __slots__ = ("app",)
 
     def __init__(self, app: ASGIApp) -> None:
@@ -64,4 +66,3 @@ class SecurityHeadersMiddleware:
             await send(message)
 
         await self.app(scope, receive, send_wrapper)
-

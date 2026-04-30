@@ -1,5 +1,7 @@
-from starlette.types import ASGIApp, Scope, Receive, Send, Message
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
 from utils.uuid7 import uuid7
+
 
 class RequestIDMiddleware:
     """Middleware to ensure every request has an X-Request-ID (UUID v7)."""
@@ -28,7 +30,7 @@ class RequestIDMiddleware:
             if message["type"] == "http.response.start":
                 resp_headers = message.setdefault("headers", [])
                 existing_keys = {k for k, v in resp_headers}
-                
+
                 if b"x-request-id" not in existing_keys:
                     resp_headers.append((b"x-request-id", req_id.encode("ascii")))
 

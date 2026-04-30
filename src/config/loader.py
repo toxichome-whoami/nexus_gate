@@ -1,14 +1,15 @@
+import asyncio
 import os
 import sys
 import tomllib
-import asyncio
 from typing import Optional
-from watchfiles import awatch
+
 import structlog
 from pydantic import ValidationError
+from watchfiles import awatch
 
-from config.schema import NexusGateConfig
 from config.defaults import generate_default_config
+from config.schema import NexusGateConfig
 
 logger = structlog.get_logger()
 
@@ -16,11 +17,13 @@ logger = structlog.get_logger()
 # Helper Procedures
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _ensure_file_exists(path: str) -> None:
     """Forces generation of scaffolding structure natively if absent."""
     if not os.path.exists(path):
         logger.info("Config file not found, generating default.", path=path)
         generate_default_config(path)
+
 
 def _parse_toml_file(path: str, exit_on_error: bool = True) -> dict:
     """Safely decodes raw disk bytes preventing corrupted config structures."""
@@ -33,6 +36,7 @@ def _parse_toml_file(path: str, exit_on_error: bool = True) -> dict:
             sys.exit(1)
         raise toml_error
 
+
 def _validate_schema(config_dict: dict, path: str) -> NexusGateConfig:
     """Applies strict Pydantic parsing ensuring zero runtime mapping failures."""
     try:
@@ -43,12 +47,15 @@ def _validate_schema(config_dict: dict, path: str) -> NexusGateConfig:
         logger.error("Config schema validation failed", errors=strict_error.errors())
         sys.exit(1)
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Core Loader Class
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class ConfigManager:
     """Acts as a global memory singleton holding validated configurations."""
+
     _instance = None
     _config: Optional[NexusGateConfig] = None
     _config_path: str = ""
@@ -62,10 +69,10 @@ class ConfigManager:
     def load(cls, path: str = "config.toml") -> NexusGateConfig:
         """Hydrates the singleton from local variables sequentially."""
         cls._config_path = path
-        
+
         _ensure_file_exists(path)
         config_payload = _parse_toml_file(path)
-        
+
         cls._config = _validate_schema(config_payload, path)
         return cls._config
 
@@ -81,12 +88,12 @@ class ConfigManager:
         """Asynchronously monitors target targets for hot-reloads dynamically."""
         if not cls._config_path:
             return
-            
+
         config_dir = os.path.dirname(os.path.abspath(cls._config_path))
         target_file = os.path.basename(cls._config_path)
-        
+
         logger.info("Starting config watcher daemon", path=cls._config_path)
-        
+
         try:
             async for changes in awatch(config_dir):
                 for change, path in changes:
@@ -94,7 +101,7 @@ class ConfigManager:
                         logger.info("Config file modification detected, refreshing")
                         cls._handle_hot_reload()
                         break
-                        
+
         except asyncio.CancelledError:
             logger.info("Config watcher daemon stopped gracefully")
 
@@ -104,9 +111,11 @@ class ConfigManager:
         try:
             new_payload = _parse_toml_file(cls._config_path, exit_on_error=False)
             new_validated = NexusGateConfig(**new_payload)
-            
+
             # old_config = cls._config  # Accessible for diffing later if needed
             cls._config = new_validated
             logger.info("Config hot-reloaded successfully on-the-fly")
         except Exception as runtime_error:
-            logger.error("Failed to hot-reload configuration file", error=str(runtime_error))
+            logger.error(
+                "Failed to hot-reload configuration file", error=str(runtime_error)
+            )

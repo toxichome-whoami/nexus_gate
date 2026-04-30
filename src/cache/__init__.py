@@ -1,11 +1,14 @@
-import structlog
 from typing import Any, Optional
 
+import structlog
+
 from config.loader import ConfigManager
+
 from .memory import MemoryCache
 from .redis_backend import RedisCache
 
 logger = structlog.get_logger()
+
 
 class CacheManager:
     @classmethod
@@ -13,7 +16,7 @@ class CacheManager:
         config = ConfigManager.get()
         if not config.cache.enabled:
             return None
-            
+
         if config.cache.backend == "redis":
             return await RedisCache.get(key)
         else:
@@ -24,7 +27,7 @@ class CacheManager:
         config = ConfigManager.get()
         if not config.cache.enabled:
             return
-            
+
         if config.cache.backend == "redis":
             await RedisCache.set(key, value, ttl)
         else:
@@ -35,7 +38,7 @@ class CacheManager:
         config = ConfigManager.get()
         if not config.cache.enabled:
             return False
-            
+
         if config.cache.backend == "redis":
             return await RedisCache.delete(key)
         else:

@@ -5,11 +5,13 @@ MCP Python SDK requires exactly ONE list_tools() and ONE call_tool() handler.
 This registry aggregates tools from multiple domain modules and binds them
 to the MCP Server in a single pass.
 """
-from typing import Callable, Awaitable
+
+from typing import Awaitable, Callable
+
 import structlog
 
 from mcp.server import Server
-from mcp.types import Tool, TextContent
+from mcp.types import TextContent, Tool
 
 logger = structlog.get_logger()
 
@@ -26,9 +28,17 @@ class ToolRegistry:
         self._tools.clear()
         self._handlers.clear()
 
-    def register(self, name: str, description: str, input_schema: dict, handler: Callable[..., Awaitable[list[TextContent]]]):
+    def register(
+        self,
+        name: str,
+        description: str,
+        input_schema: dict,
+        handler: Callable[..., Awaitable[list[TextContent]]],
+    ):
         """Records a tool and its handler callback."""
-        self._tools.append(Tool(name=name, description=description, inputSchema=input_schema))
+        self._tools.append(
+            Tool(name=name, description=description, inputSchema=input_schema)
+        )
         self._handlers[name] = handler
 
     def attach_to_server(self, server: Server):
@@ -39,7 +49,9 @@ class ToolRegistry:
             return self._tools
 
         @server.call_tool()
-        async def handle_call_tool(name: str, arguments: dict | None) -> list[TextContent]:
+        async def handle_call_tool(
+            name: str, arguments: dict | None
+        ) -> list[TextContent]:
             handler = self._handlers.get(name)
             if not handler:
                 raise ValueError(f"Unknown tool: {name}")
@@ -50,7 +62,13 @@ class ToolRegistry:
             except Exception as e:
                 logger.error("Tool execution failed", tool=name, error=str(e))
                 # Return a sanitized message without internal implementation details
-                return [TextContent(type="text", text=f"Tool '{name}' encountered an error. Please try again or adjust your parameters.")]
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Tool '{name}' encountered an error. Please try again or adjust your parameters.",
+                    )
+                ]
+
 
 # The global registry mapping tools before the server boots.
 mcp_tool_registry = ToolRegistry()

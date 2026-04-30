@@ -3,13 +3,14 @@ Metrics endpoint exposing Prometheus-compatible OpenMetrics format.
 Tracks: request counts by path/method/status, active DB connections,
 cache hit/miss ratios, rate limit rejections, webhook queue depth.
 """
-import time
+
 import os
+import time
+from typing import Any
+
+import psutil
 from fastapi import APIRouter, Request
 from fastapi.responses import PlainTextResponse
-import psutil
-
-from config.loader import ConfigManager
 
 router = APIRouter()
 
@@ -36,14 +37,18 @@ _start_time = time.time()
 # Tracking Appends
 # ─────────────────────────────────────────────────────────────────────────────
 
-def increment(key: str, labels: dict = None):
+
+def increment(key: str, labels: dict | None = None):
     """Mutates global counters pushing bounded data footprints."""
     global _metrics
     if labels:
-        label_key = f"{key}|{','.join(f'{k}={v}' for k,v in sorted(labels.items()))}"
-        _metrics["requests_total"][label_key] = _metrics["requests_total"].get(label_key, 0) + 1
+        label_key = f"{key}|{','.join(f'{k}={v}' for k, v in sorted(labels.items()))}"
+        _metrics["requests_total"][label_key] = (
+            _metrics["requests_total"].get(label_key, 0) + 1
+        )
     else:
         _metrics[key] = _metrics.get(key, 0) + 1
+
 
 def record_duration(duration_ms: float):
     """Ingests latency aggregates explicitly garbage-collecting older frames."""
@@ -51,70 +56,119 @@ def record_duration(duration_ms: float):
     if len(_metrics["requests_duration_ms"]) > 10000:
         _metrics["requests_duration_ms"] = _metrics["requests_duration_ms"][-5000:]
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Format Renderers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _format_metric(name: str, value, labels: dict = None, help_text: str = "", metric_type: str = "counter") -> str:
+
+def _format_metric(
+    name: str,
+    value: Any,
+    labels: dict | None = None,
+    help_text: str = "",
+    metric_type: str = "counter",
+) -> str:
     """Renders explicitly valid Prometheus textual targets."""
     lines = []
     if help_text:
         lines.append(f"# HELP {name} {help_text}")
     lines.append(f"# TYPE {name} {metric_type}")
-    
+
     if labels:
         label_str = ",".join(f'{k}="{v}"' for k, v in labels.items())
         lines.append(f"{name}{{{label_str}}} {value}")
     else:
         lines.append(f"{name} {value}")
-        
+
     return "\n".join(lines)
+
 
 def _build_json_metrics(uptime, mem_mb, cpu_pct, avg_duration, p99) -> dict:
     """Renders human-readable hierarchical JSON models targeting visual dashboards."""
     return {
         "status": "online",
         "uptime_seconds": round(uptime, 2),
-        "system": {
-            "memory_mb": round(mem_mb, 2),
-            "cpu_percent": round(cpu_pct, 2)
-        },
+        "system": {"memory_mb": round(mem_mb, 2), "cpu_percent": round(cpu_pct, 2)},
         "performance": {
             "avg_request_ms": round(avg_duration, 3),
-            "p99_request_ms": round(p99, 3)
+            "p99_request_ms": round(p99, 3),
         },
         "counters": {
             "rate_limit_hits": _metrics["rate_limit_hits"],
             "auth_failures": _metrics["auth_failures"],
-            "cache": {"hits": _metrics["cache_hits"], "misses": _metrics["cache_misses"]},
-            "database": {"queries": _metrics["db_queries_total"], "errors": _metrics["db_query_errors"]},
-            "webhooks": {"delivered": _metrics["webhook_delivered"], "failed": _metrics["webhook_failed"]}
-        }
+            "cache": {
+                "hits": _metrics["cache_hits"],
+                "misses": _metrics["cache_misses"],
+            },
+            "database": {
+                "queries": _metrics["db_queries_total"],
+                "errors": _metrics["db_query_errors"],
+            },
+            "webhooks": {
+                "delivered": _metrics["webhook_delivered"],
+                "failed": _metrics["webhook_failed"],
+            },
+        },
     }
 
-def _build_prometheus_metrics(uptime, mem_mb, cpu_pct, avg_duration, p99) -> PlainTextResponse:
+
+def _build_prometheus_metrics(
+    uptime, mem_mb, cpu_pct, avg_duration, p99
+) -> PlainTextResponse:
     """Binds pure text execution streams strictly compatible with OpenMetrics v0.0.4 formats."""
     lines = [
         "# NexusGate Metrics",
-        _format_metric("nexusgate_uptime_seconds", round(uptime, 2), help_text="Server uptime", metric_type="gauge"),
-        _format_metric("nexusgate_memory_mb", round(mem_mb, 2), help_text="Memory usage", metric_type="gauge"),
-        _format_metric("nexusgate_cpu_percent", round(cpu_pct, 2), help_text="CPU usage", metric_type="gauge"),
-        _format_metric("nexusgate_request_duration_avg_ms", round(avg_duration, 3), help_text="Avg latency", metric_type="gauge"),
-        _format_metric("nexusgate_request_duration_p99_ms", round(p99, 3), help_text="P99 latency", metric_type="gauge"),
+        _format_metric(
+            "nexusgate_uptime_seconds",
+            round(uptime, 2),
+            help_text="Server uptime",
+            metric_type="gauge",
+        ),
+        _format_metric(
+            "nexusgate_memory_mb",
+            round(mem_mb, 2),
+            help_text="Memory usage",
+            metric_type="gauge",
+        ),
+        _format_metric(
+            "nexusgate_cpu_percent",
+            round(cpu_pct, 2),
+            help_text="CPU usage",
+            metric_type="gauge",
+        ),
+        _format_metric(
+            "nexusgate_request_duration_avg_ms",
+            round(avg_duration, 3),
+            help_text="Avg latency",
+            metric_type="gauge",
+        ),
+        _format_metric(
+            "nexusgate_request_duration_p99_ms",
+            round(p99, 3),
+            help_text="P99 latency",
+            metric_type="gauge",
+        ),
         _format_metric("nexusgate_rate_limit_hits_total", _metrics["rate_limit_hits"]),
         _format_metric("nexusgate_auth_failures_total", _metrics["auth_failures"]),
-        _format_metric("nexusgate_webhook_delivered_total", _metrics["webhook_delivered"]),
+        _format_metric(
+            "nexusgate_webhook_delivered_total", _metrics["webhook_delivered"]
+        ),
         _format_metric("nexusgate_webhook_failed_total", _metrics["webhook_failed"]),
         _format_metric("nexusgate_cache_hits_total", _metrics["cache_hits"]),
         _format_metric("nexusgate_cache_misses_total", _metrics["cache_misses"]),
         _format_metric("nexusgate_db_queries_total", _metrics["db_queries_total"]),
         _format_metric("nexusgate_db_query_errors_total", _metrics["db_query_errors"]),
     ]
-    return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
+    return PlainTextResponse(
+        "\n".join(lines) + "\n", media_type="text/plain; version=0.0.4"
+    )
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Protected Endpoint
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @router.get("/metrics", include_in_schema=False)
 async def metrics_endpoint(request: Request, format: str = "prometheus"):
@@ -125,7 +179,11 @@ async def metrics_endpoint(request: Request, format: str = "prometheus"):
 
     durations = _metrics["requests_duration_ms"]
     avg_duration = sum(durations) / len(durations) if durations else 0
-    p99 = sorted(durations)[int(len(durations) * 0.99)] if len(durations) > 100 else avg_duration
+    p99 = (
+        sorted(durations)[int(len(durations) * 0.99)]
+        if len(durations) > 100
+        else avg_duration
+    )
 
     if format == "json":
         return _build_json_metrics(uptime, mem_mb, cpu_pct, avg_duration, p99)

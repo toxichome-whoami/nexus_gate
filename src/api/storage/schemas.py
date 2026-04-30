@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any, Literal
-from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional
+
+from pydantic import BaseModel
+
 
 class StorageItem(BaseModel):
     name: str
@@ -12,6 +13,7 @@ class StorageItem(BaseModel):
     checksum_sha256: Optional[str] = None
     items_count: Optional[int] = None
 
+
 class UploadInitRequest(BaseModel):
     action: Literal["initiate"]
     filename: str
@@ -21,8 +23,19 @@ class UploadInitRequest(BaseModel):
     checksum_sha256: str
     chunk_size: Optional[int] = None
 
+
 class ActionRequest(BaseModel):
-    action: Literal["rename", "move", "copy", "delete", "mkdir", "info", "exists", "bulk_delete", "bulk_move"]
+    action: Literal[
+        "rename",
+        "move",
+        "copy",
+        "delete",
+        "mkdir",
+        "info",
+        "exists",
+        "bulk_delete",
+        "bulk_move",
+    ]
     source: Optional[str] = None
     target: Optional[str] = None
     sources: Optional[List[str]] = None

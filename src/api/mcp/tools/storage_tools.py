@@ -4,21 +4,24 @@ Storage Tools for MCP.
 Exposes NexusGate's file system capabilities as MCP tools.
 All paths are resolved and strictly confined within the storage alias root.
 """
+
 from __future__ import annotations
 
 import os
-import structlog
-from mcp.types import TextContent
 
-from config.loader import ConfigManager
+import structlog
+
+from api.mcp.session_auth import get_mcp_auth
 from api.mcp.tools.base import MAX_DIRECTORY_ENTRIES, MAX_FILE_READ_BYTES
 from api.mcp.tools.registry import mcp_tool_registry
-from api.mcp.session_auth import get_mcp_auth
+from config.loader import ConfigManager
+from mcp.types import TextContent
 
 logger = structlog.get_logger()
 
 
 # -- Path Security ---------------------------------------------------------
+
 
 def _resolve_safe_path(storage_root: str, user_path: str) -> str | None:
     """
@@ -34,7 +37,10 @@ def _resolve_safe_path(storage_root: str, user_path: str) -> str | None:
     canonical_target = os.path.realpath(joined)
 
     # Verify containment: the resolved target must start with the root
-    if not canonical_target.startswith(canonical_root + os.sep) and canonical_target != canonical_root:
+    if (
+        not canonical_target.startswith(canonical_root + os.sep)
+        and canonical_target != canonical_root
+    ):
         return None
 
     return canonical_target
@@ -50,6 +56,7 @@ def _check_storage_scope(alias: str) -> bool:
 
 
 # -- Handlers --------------------------------------------------------------
+
 
 async def _list_storages() -> list[TextContent]:
     """Lists storage aliases visible to the authenticated session."""
@@ -68,7 +75,12 @@ async def _list_storages() -> list[TextContent]:
 
 async def _list_files(storage: str, path: str = "/") -> list[TextContent]:
     if not _check_storage_scope(storage):
-        return [TextContent(type="text", text=f"Access denied: storage '{storage}' is outside your scope.")]
+        return [
+            TextContent(
+                type="text",
+                text=f"Access denied: storage '{storage}' is outside your scope.",
+            )
+        ]
 
     storage_config = ConfigManager.get().storage.get(storage)
     if not storage_config:
@@ -76,7 +88,9 @@ async def _list_files(storage: str, path: str = "/") -> list[TextContent]:
 
     target_dir = _resolve_safe_path(storage_config.path, path)
     if target_dir is None:
-        return [TextContent(type="text", text="Access denied: path traversal detected.")]
+        return [
+            TextContent(type="text", text="Access denied: path traversal detected.")
+        ]
 
     if not os.path.isdir(target_dir):
         return [TextContent(type="text", text=f"Path '{path}' is not a directory.")]
@@ -92,12 +106,21 @@ async def _list_files(storage: str, path: str = "/") -> list[TextContent]:
     if overflow > 0:
         lines.append(f"  ... and {overflow} more")
 
-    return [TextContent(type="text", text=f"Contents of '{storage}:{path}':\n" + "\n".join(lines))]
+    return [
+        TextContent(
+            type="text", text=f"Contents of '{storage}:{path}':\n" + "\n".join(lines)
+        )
+    ]
 
 
 async def _read_file(storage: str, path: str) -> list[TextContent]:
     if not _check_storage_scope(storage):
-        return [TextContent(type="text", text=f"Access denied: storage '{storage}' is outside your scope.")]
+        return [
+            TextContent(
+                type="text",
+                text=f"Access denied: storage '{storage}' is outside your scope.",
+            )
+        ]
 
     storage_config = ConfigManager.get().storage.get(storage)
     if not storage_config:
@@ -105,7 +128,9 @@ async def _read_file(storage: str, path: str) -> list[TextContent]:
 
     file_path = _resolve_safe_path(storage_config.path, path)
     if file_path is None:
-        return [TextContent(type="text", text="Access denied: path traversal detected.")]
+        return [
+            TextContent(type="text", text="Access denied: path traversal detected.")
+        ]
 
     if not os.path.isfile(file_path):
         return [TextContent(type="text", text=f"File '{path}' does not exist.")]
@@ -119,10 +144,15 @@ async def _read_file(storage: str, path: str) -> list[TextContent]:
             content = fh.read()
         return [TextContent(type="text", text=content)]
     except Exception:
-        return [TextContent(type="text", text="Failed to read file due to an internal error.")]
+        return [
+            TextContent(
+                type="text", text="Failed to read file due to an internal error."
+            )
+        ]
 
 
 # -- Registration ----------------------------------------------------------
+
 
 def register_storage_tools() -> None:
     """Registers storage capabilities into the global tool registry."""
@@ -131,7 +161,7 @@ def register_storage_tools() -> None:
         name="list_storages",
         description="Lists all file system directory aliases securely mounted behind NexusGate.",
         input_schema={"type": "object", "properties": {}},
-        handler=_list_storages
+        handler=_list_storages,
     )
 
     mcp_tool_registry.register(
@@ -141,11 +171,11 @@ def register_storage_tools() -> None:
             "type": "object",
             "properties": {
                 "storage": {"type": "string"},
-                "path": {"type": "string", "default": "/"}
+                "path": {"type": "string", "default": "/"},
             },
-            "required": ["storage"]
+            "required": ["storage"],
         },
-        handler=_list_files
+        handler=_list_files,
     )
 
     mcp_tool_registry.register(
@@ -153,11 +183,8 @@ def register_storage_tools() -> None:
         description="Extracts pure text string data locally securely capped to 1MB context limitations.",
         input_schema={
             "type": "object",
-            "properties": {
-                "storage": {"type": "string"},
-                "path": {"type": "string"}
-            },
-            "required": ["storage", "path"]
+            "properties": {"storage": {"type": "string"}, "path": {"type": "string"}},
+            "required": ["storage", "path"],
         },
-        handler=_read_file
+        handler=_read_file,
     )

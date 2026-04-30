@@ -1,6 +1,6 @@
+import base64
 import os
 import secrets
-import base64
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Default Template Definitions
@@ -58,6 +58,7 @@ rate_limit_override = 0
 # Bootstrap Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _scaffold_directories() -> None:
     """Pre-configures the persistent structural filesystem bounds required for execution."""
     os.makedirs("./logs", exist_ok=True)
@@ -65,14 +66,17 @@ def _scaffold_directories() -> None:
     os.makedirs("./data", exist_ok=True)
     os.makedirs("./storage/media", exist_ok=True)
 
+
 def _render_config_payload(admin_secret: str) -> str:
     """Ijects dynamically generated cryptographic salts strictly into the config template."""
     return DEFAULT_CONFIG_CONTENT.format(admin_secret=admin_secret)
+
 
 def _write_config_file(path: str, payload: str) -> None:
     """Commits the bootstrapped config to the active execution directory safely."""
     with open(path, "w", encoding="utf-8") as file:
         file.write(payload)
+
 
 def _print_bootstrap_instructions(path: str, admin_secret: str) -> None:
     """Alerts administrators locally to store the generated bootstrap credential."""
@@ -85,9 +89,11 @@ def _print_bootstrap_instructions(path: str, admin_secret: str) -> None:
     print(f"To use it, set header: Authorization: Bearer {encoded_token}")
     print("=" * 60)
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Execution
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def generate_default_config(path: str = "config.toml") -> str:
     """Auto-generates the local TOML mapping alongside physical database targets."""
@@ -100,6 +106,7 @@ def generate_default_config(path: str = "config.toml") -> str:
     _print_bootstrap_instructions(path, admin_secret)
 
     return admin_secret
+
 
 if __name__ == "__main__":
     generate_default_config()

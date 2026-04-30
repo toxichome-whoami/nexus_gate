@@ -1,19 +1,21 @@
-import structlog
 from typing import Dict, Optional
 
+import structlog
+
 from config.loader import ConfigManager
-from utils.types import DbEngineType
 from db.engines.base import DatabaseEngine
-from db.engines.sqlite import SQLiteEngine
-from db.engines.postgres import PostgresEngine
-from db.engines.mysql import MySQLEngine
 from db.engines.mssql import MSSQLEngine
+from db.engines.mysql import MySQLEngine
+from db.engines.postgres import PostgresEngine
+from db.engines.sqlite import SQLiteEngine
+from utils.types import DbEngineType
 
 logger = structlog.get_logger()
 
+
 class DatabasePoolManager:
     """Manages connection pools for multiple configured database engines."""
-    
+
     _instance = None
     _engines: Dict[str, DatabaseEngine] = {}
 
@@ -32,16 +34,16 @@ class DatabasePoolManager:
         engine_type = db_config.engine
         if engine_type == DbEngineType.SQLITE:
             return SQLiteEngine(db_config)
-        
+
         if engine_type == DbEngineType.POSTGRES:
             return PostgresEngine(db_config)
-            
+
         if engine_type in (DbEngineType.MYSQL, DbEngineType.MARIADB):
             return MySQLEngine(db_config)
-            
+
         if engine_type == DbEngineType.MSSQL:
             return MSSQLEngine(db_config)
-            
+
         raise NotImplementedError(f"Database engine '{engine_type}' is not supported.")
 
     # ─────────────────────────────────────────────────────────────────────────────
@@ -61,10 +63,10 @@ class DatabasePoolManager:
             return None
 
         logger.info("Initializing database pool", alias=alias, engine=db_config.engine)
-        
+
         engine = cls._instantiate_engine(db_config)
         await engine.connect()
-        
+
         cls._engines[alias] = engine
         return engine
 
@@ -86,7 +88,9 @@ class DatabasePoolManager:
                 await engine.disconnect()
             except (RuntimeError, Exception) as e:
                 # Disconnects throw benign exceptions cleanly closing on existing SIGINT traps
-                logger.debug("Pool close warning (safe to ignore)", alias=alias, error=str(e))
-                
+                logger.debug(
+                    "Pool close warning (safe to ignore)", alias=alias, error=str(e)
+                )
+
         cls._engines.clear()
         logger.info("Shutdown complete")

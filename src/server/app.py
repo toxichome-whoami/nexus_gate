@@ -1,43 +1,49 @@
-from fastapi import FastAPI, APIRouter, Request
-from fastapi.responses import JSONResponse, FileResponse
-from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException as StarletteHTTPException
 import os
 
-from config.loader import ConfigManager
-from server.lifespan import lifespan
-from server.middleware.security_headers import SecurityHeadersMiddleware
-from server.middleware.request_id import RequestIDMiddleware
-from server.middleware.waf import WAFMiddleware
-from server.middleware.logging_mw import LoggingMiddleware
-from server.middleware.cors import setup_cors
-from server.middleware.rate_limit import RateLimitMiddleware
-from server.middleware.idempotency import IdempotencyMiddleware
+from fastapi import APIRouter, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from api import database, federation, storage
+from api.admin import router as admin_router
 
 # Routers
 from api.core import health
 from api.core.metrics import router as metrics_router
-from api import database, storage, federation
-from api.admin import router as admin_router
+from config.loader import ConfigManager
+from server.lifespan import lifespan
+from server.middleware.cors import setup_cors
+from server.middleware.idempotency import IdempotencyMiddleware
+from server.middleware.logging_mw import LoggingMiddleware
+from server.middleware.rate_limit import RateLimitMiddleware
+from server.middleware.request_id import RequestIDMiddleware
+from server.middleware.security_headers import SecurityHeadersMiddleware
+from server.middleware.waf import WAFMiddleware
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Path Verification
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _is_playground_route(path: str) -> bool:
     """Checks if the request path belongs to the Swagger or OpenAPI spec."""
     return path.startswith("/api/docs") or path.startswith("/api/spec")
+
 
 def _get_favicon_path() -> str:
     """Builds the absolute path to the application's favicon."""
     return os.path.join(os.path.dirname(__file__), "..", "icon", "favicon.ico")
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Middleware Handlers
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class PlaygroundSecurityMiddleware:
     """Blocks access to API documentation endpoints if playground is disabled natively without breaking SSE."""
+
     def __init__(self, app):
         self.app = app
 
@@ -55,13 +61,14 @@ class PlaygroundSecurityMiddleware:
                     "success": False,
                     "error": {
                         "code": "FEATURE_DISABLED",
-                        "message": "Playground is currently disabled"
-                    }
-                }
+                        "message": "Playground is currently disabled",
+                    },
+                },
             )
             return await response(scope, receive, send)
 
         return await self.app(scope, receive, send)
+
 
 def _attach_middlewares(app: FastAPI):
     """Attaches all global middlewares to the application pipeline."""
@@ -74,27 +81,28 @@ def _attach_middlewares(app: FastAPI):
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Exception Handlers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_error_response(request: Request, status_code: int, code: str, message: str, details=None) -> JSONResponse:
+
+def _build_error_response(
+    request: Request, status_code: int, code: str, message: str, details=None
+) -> JSONResponse:
     """Standardizes JSON response structures for server errors."""
     return JSONResponse(
         status_code=status_code,
         content={
             "success": False,
-            "error": {
-                "code": code,
-                "message": message,
-                "details": details
-            },
+            "error": {"code": code, "message": message, "details": details},
             "meta": {
                 "request_id": getattr(request.state, "request_id", "-"),
-                "version": request.app.version
-            }
-        }
+                "version": request.app.version,
+            },
+        },
     )
+
 
 def _attach_exception_handlers(app: FastAPI):
     """Registers standard RESTful JSON responses for unhandled application exceptions."""
@@ -103,15 +111,27 @@ def _attach_exception_handlers(app: FastAPI):
     async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         error_code = getattr(exc, "code", "SERVER_HTTP_ERROR")
         error_details = getattr(exc, "details", None)
-        return _build_error_response(request, exc.status_code, error_code, exc.detail, error_details)
+        return _build_error_response(
+            request, exc.status_code, error_code, exc.detail, error_details
+        )
 
     @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(request: Request, exc: RequestValidationError):
-        return _build_error_response(request, 422, "INPUT_SCHEMA_INVALID", "Request validation failed", exc.errors())
+    async def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ):
+        return _build_error_response(
+            request,
+            422,
+            "INPUT_SCHEMA_INVALID",
+            "Request validation failed",
+            exc.errors(),
+        )
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Router Attachments
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _attach_routers(app: FastAPI):
     """Registers all API versioned and unversioned core routing endpoints."""
@@ -127,6 +147,7 @@ def _attach_routers(app: FastAPI):
     # MCP Server (zero-cost when features.mcp is disabled)
     if config.features.mcp:
         from api.mcp import router as mcp_router
+
         api_v1.include_router(mcp_router, prefix="/mcp")
 
     app.include_router(api_v1)
@@ -143,9 +164,11 @@ def _attach_routers(app: FastAPI):
             return FileResponse(icon_path)
         return JSONResponse(status_code=404, content={"error": "Icon not found"})
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Factory
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def create_app() -> FastAPI:
     """Instantiates the NexusGate application with all layers loaded and properly structured."""
@@ -156,7 +179,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
         docs_url="/api/docs",
         redoc_url=None,
-        openapi_url="/api/spec"
+        openapi_url="/api/spec",
     )
 
     _attach_middlewares(app)
@@ -164,4 +187,3 @@ def create_app() -> FastAPI:
     _attach_exception_handlers(app)
 
     return app
-

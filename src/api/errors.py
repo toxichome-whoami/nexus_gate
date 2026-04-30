@@ -1,6 +1,7 @@
+from typing import Any, Optional
+
 from fastapi import HTTPException
-from dataclasses import dataclass
-from typing import Optional, Any
+
 
 class ErrorCodes:
     # Auth Errors
@@ -55,7 +56,13 @@ class ErrorCodes:
 
 
 class NexusGateException(HTTPException):
-    def __init__(self, code: str, message: str, status_code: int = 400, details: Optional[Any] = None):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        status_code: int = 400,
+        details: Optional[Any] = None,
+    ):
         self.code = code
         self.message = message
         self.details = details

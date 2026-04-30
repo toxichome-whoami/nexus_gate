@@ -5,8 +5,11 @@ MCP Python SDK requires exactly ONE list_resources() and ONE read_resource() han
 This registry aggregates context resources from multiple domain modules
 (database schemas, storage settings) into a single hook.
 """
-from typing import Callable, Awaitable
+
+from typing import Any, Awaitable, Callable
+
 import structlog
+from pydantic import AnyUrl
 
 from mcp.server import Server
 from mcp.types import Resource, TextResourceContents
@@ -46,25 +49,42 @@ class ResourceRegistry:
             return self._resources
 
         @server.read_resource()
-        async def handle_read_resource(uri: str) -> list[TextResourceContents]:
+        async def handle_read_resource(uri: AnyUrl) -> Any:
+            uri_str = str(uri)
             for prefix, reader_func in self._readers.items():
-                if uri.startswith(prefix):
+                if uri_str.startswith(prefix):
                     try:
-                        return await reader_func(uri)
+                        return await reader_func(uri_str)
                     except Exception as execution_error:
-                        logger.error("Failed to read resource", uri=uri, error=str(execution_error))
+                        logger.error(
+                            "Failed to read resource",
+                            uri=uri_str,
+                            error=str(execution_error),
+                        )
                         # Sanitized error — no internal details exposed to the client
-                        return [TextResourceContents(uri=uri, mimeType="text/plain", text="Resource read failed due to an internal error.")]
+                        return [
+                            TextResourceContents(
+                                uri=uri,
+                                mimeType="text/plain",
+                                text="Resource read failed due to an internal error.",
+                            )
+                        ]
 
-            return [TextResourceContents(uri=uri, mimeType="text/plain", text="Unknown resource.")]
+            return [
+                TextResourceContents(
+                    uri=uri, mimeType="text/plain", text="Unknown resource."
+                )
+            ]
+
 
 # Global registry mapped out before the server boots.
 mcp_resource_registry = ResourceRegistry()
 
-def build_error_text_resource(target_uri: str, error_message: str) -> TextResourceContents:
+
+def build_error_text_resource(
+    target_uri: str, error_message: str
+) -> TextResourceContents:
     """Returns a standardized plain-text error resource envelope."""
     return TextResourceContents(
-        uri=target_uri,
-        mimeType="text/plain",
-        text=error_message
+        uri=AnyUrl(target_uri), mimeType="text/plain", text=error_message
     )

@@ -5,11 +5,13 @@ Owns the singleton MCP Server instance. Lazy-initialized on first access
 so that zero memory is consumed when features.mcp is disabled.
 All tool and resource registrations are delegated to dedicated modules.
 """
-import structlog
+
 from typing import Optional
 
-from mcp.server import Server
+import structlog
+
 from config.loader import ConfigManager
+from mcp.server import Server
 
 logger = structlog.get_logger()
 
@@ -59,16 +61,16 @@ class MCPServerManager:
     @classmethod
     def _attach_handlers(cls, server: Server) -> None:
         """Registers tools and resources via their dedicated modules."""
-        
+
         # Pull Registries
-        from api.mcp.tools.registry import mcp_tool_registry
+        from api.mcp.resources.database_resources import register_database_resources
         from api.mcp.resources.registry import mcp_resource_registry
-        
+        from api.mcp.resources.storage_resources import register_storage_resources
+
         # Pull Implementations
         from api.mcp.tools.database_tools import register_database_tools
+        from api.mcp.tools.registry import mcp_tool_registry
         from api.mcp.tools.storage_tools import register_storage_tools
-        from api.mcp.resources.database_resources import register_database_resources
-        from api.mcp.resources.storage_resources import register_storage_resources
 
         # Prevent duplicate entries on re-initialization
         mcp_tool_registry.clear()
@@ -77,12 +79,11 @@ class MCPServerManager:
         # Load tools logic natively
         register_database_tools()
         register_storage_tools()
-        
+
         # Load resources logic natively
         register_database_resources()
         register_storage_resources()
-        
+
         # Bind everything directly up to the single active router instance
         mcp_tool_registry.attach_to_server(server)
         mcp_resource_registry.attach_to_server(server)
-

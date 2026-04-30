@@ -2,21 +2,25 @@
 Circuit Breaker: Prevents cascade failures by tracking failures
 per DB alias and tripping an OPEN state after threshold is exceeded.
 """
+
 import asyncio
 import time
-import structlog
-from typing import Dict
 from enum import Enum
+from typing import Dict
+
+import structlog
 
 from config.loader import ConfigManager
 from security.storage import SecurityStorage
 
 logger = structlog.get_logger()
 
+
 class CircuitState(str, Enum):
-    CLOSED = "closed"   # Normal operation
-    OPEN = "open"       # Failing — rejecting requests
+    CLOSED = "closed"  # Normal operation
+    OPEN = "open"  # Failing — rejecting requests
     HALF_OPEN = "half_open"  # Testing recovery
+
 
 class CircuitBreaker:
     """Per-resource circuit breaker tracking failure/success windows."""
@@ -36,10 +40,16 @@ class CircuitBreaker:
     @classmethod
     def _persist_state(cls, key: str, circuit: dict):
         """Asynchronously triggers the storage layer to commit state without blocking."""
-        asyncio.create_task(SecurityStorage.update_circuit(
-            key, circuit["state"], circuit["failures"], 
-            circuit["successes"], circuit["last_failure_time"], circuit["tripped_at"]
-        ))
+        asyncio.create_task(
+            SecurityStorage.update_circuit(
+                key,
+                circuit["state"],
+                circuit["failures"],
+                circuit["successes"],
+                circuit["last_failure_time"],
+                circuit["tripped_at"],
+            )
+        )
 
     # ─────────────────────────────────────────────────────────────────────────────
     # Core Logic
@@ -78,7 +88,7 @@ class CircuitBreaker:
         config = ConfigManager.get().circuit_breaker
         circuit = cls._get_circuit(key)
         state_changed = False
-        
+
         # Heal from HALF_OPEN
         if circuit["state"] == CircuitState.HALF_OPEN.value:
             circuit["successes"] += 1
@@ -87,7 +97,7 @@ class CircuitBreaker:
                 circuit["failures"] = 0
                 state_changed = True
                 logger.info("Circuit closed (recovered)", key=key)
-                
+
         # Natural decay of failure count
         elif circuit["state"] == CircuitState.CLOSED.value:
             if circuit["failures"] > 0:
@@ -115,7 +125,9 @@ class CircuitBreaker:
         if should_trip and is_closed:
             circuit["state"] = CircuitState.OPEN.value
             circuit["tripped_at"] = time.time()
-            logger.warning("Circuit tripped OPEN", key=key, failures=circuit["failures"])
+            logger.warning(
+                "Circuit tripped OPEN", key=key, failures=circuit["failures"]
+            )
             cls._persist_state(key, circuit)
 
     # ─────────────────────────────────────────────────────────────────────────────
@@ -139,4 +151,6 @@ class CircuitBreaker:
     @classmethod
     async def reset(cls, key: str):
         """Manually forces a closed state overlay."""
-        await SecurityStorage.update_circuit(key, CircuitState.CLOSED.value, 0, 0, None, None)
+        await SecurityStorage.update_circuit(
+            key, CircuitState.CLOSED.value, 0, 0, None, None
+        )

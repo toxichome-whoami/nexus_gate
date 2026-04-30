@@ -4,17 +4,16 @@ Shared engine resolution and result formatting for MCP tool handlers.
 Centralizes database access patterns so individual tool modules stay thin.
 Every tool resolves engines through this class instead of touching the pool directly.
 """
+
 from __future__ import annotations
 
 from typing import List
 
-from mcp.types import TextContent
-
 from config.loader import ConfigManager
 from config.schema import DatabaseDefConfig
-from db.pool import DatabasePoolManager
 from db.engines.base import DatabaseEngine, QueryResult
-
+from db.pool import DatabasePoolManager
+from mcp.types import TextContent
 
 # ── Safety Caps ──────────────────────────────────────────────────────────
 # Prevents large payloads from blowing up the model's context window or RAM.
@@ -36,7 +35,9 @@ class EngineResolver:
         return engine
 
     @staticmethod
-    async def require_engine_and_config(alias: str) -> tuple[DatabaseEngine, DatabaseDefConfig]:
+    async def require_engine_and_config(
+        alias: str,
+    ) -> tuple[DatabaseEngine, DatabaseDefConfig]:
         """Returns both engine and its config. Raises on missing alias."""
         config = ConfigManager.get()
         db_config = config.database.get(alias)

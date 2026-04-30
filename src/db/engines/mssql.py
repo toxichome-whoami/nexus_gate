@@ -1,19 +1,25 @@
 """MSSQL (SQL Server) engine implementation using aioodbc."""
-from typing import List, Dict, Any, Optional
+
+from typing import Any, Dict, List, Optional
 
 try:
-    from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
     from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+
     HAS_AIOODBC = True
 except ImportError:
     HAS_AIOODBC = False
+    create_async_engine: Any = None
+    AsyncEngine: Any = None
+    text: Any = None
 
-from db.engines.base import DatabaseEngine, TableInfo, ColumnInfo, QueryResult
 from config.schema import DatabaseDefConfig
+from db.engines.base import ColumnInfo, DatabaseEngine, QueryResult, TableInfo
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper Functions
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _normalize_uri(raw_uri: str) -> str:
     """Safely transposes human-readable schemes to driver-specific representations."""
@@ -23,9 +29,17 @@ def _normalize_uri(raw_uri: str) -> str:
         return raw_uri.replace("sqlserver://", "mssql+aioodbc://")
     return raw_uri
 
+
 def _is_mutation_query(sql: str) -> bool:
     """Determines if the raw payload enforces write locks or mutates schema/data."""
-    return sql.strip().upper().startswith(("INSERT", "UPDATE", "DELETE", "TRUNCATE", "DROP", "CREATE", "ALTER"))
+    return (
+        sql.strip()
+        .upper()
+        .startswith(
+            ("INSERT", "UPDATE", "DELETE", "TRUNCATE", "DROP", "CREATE", "ALTER")
+        )
+    )
+
 
 async def _execute_mutation(conn, statement, params: dict) -> QueryResult:
     """Dispatches a mutation and forces an explicit commit."""
@@ -33,21 +47,24 @@ async def _execute_mutation(conn, statement, params: dict) -> QueryResult:
     await conn.commit()
     return QueryResult(affected_rows=result.rowcount)
 
+
 async def _execute_read(conn, statement, params: dict) -> QueryResult:
     """Resolves standard non-mutating statements into explicit mapping lists."""
     result = await conn.execute(statement, params)
     rows = [dict(row._mapping) for row in result] if result.returns_rows else []
     columns = list(result.keys()) if result.keys() else []
-    
+
     if not result.returns_rows:
         # Commit dynamically to free isolation level row locks gracefully
         await conn.commit()
-        
+
     return QueryResult(columns=columns, rows=rows, affected_rows=result.rowcount)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MSSQL Driver
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class MSSQLEngine(DatabaseEngine):
     """Microsoft SQL Server async engine via aioodbc + SQLAlchemy."""
@@ -62,7 +79,7 @@ class MSSQLEngine(DatabaseEngine):
         standardized_uri = _normalize_uri(config.url)
         overflow_buffer = max(0, config.pool_max - config.pool_min)
 
-        self.engine: AsyncEngine = create_async_engine(
+        self.engine: Any = create_async_engine(
             standardized_uri,
             pool_size=config.pool_min,
             max_overflow=overflow_buffer,
@@ -115,13 +132,16 @@ class MSSQLEngine(DatabaseEngine):
                     type=row[1],
                     nullable=(row[2] == "YES"),
                     primary_key=bool(row[3]),
-                ) for row in result
+                )
+                for row in result
             ]
 
-    async def execute(self, sql: str, params: Optional[Dict[str, Any]] = None) -> QueryResult:
+    async def execute(
+        self, sql: str, params: Optional[Dict[str, Any]] = None
+    ) -> QueryResult:
         query_params = params or {}
         statement = text(sql)
-        
+
         async with self.engine.connect() as conn:
             if _is_mutation_query(sql):
                 return await _execute_mutation(conn, statement, query_params)

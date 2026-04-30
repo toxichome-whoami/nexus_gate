@@ -1,35 +1,46 @@
 import base64
-import httpx
-import urllib.parse
 import ipaddress
-from fastapi import Request
-from starlette.responses import StreamingResponse
-from starlette.background import BackgroundTask
+import urllib.parse
 
+import httpx
+from fastapi import Request
+from starlette.background import BackgroundTask
+from starlette.responses import StreamingResponse
+
+from api.errors import ErrorCodes, NexusGateException
 from config.loader import ConfigManager
-from api.errors import NexusGateException, ErrorCodes
+
 
 def get_proxy_client(request: Request, verify_ssl: bool = True) -> httpx.AsyncClient:
     """Manages globally persistent proxy connections mapping trust states attached to the ASGI app."""
     if not hasattr(request.app.state, "http_clients"):
         request.app.state.http_clients = {}
-        
+
     clients = request.app.state.http_clients
     if verify_ssl not in clients:
         clients[verify_ssl] = httpx.AsyncClient(timeout=30.0, verify=verify_ssl)
     return clients[verify_ssl]
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Proxy Request Builders
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_remote_url(srv_config, target_alias: str, path: str, query: str, is_database: bool) -> str:
+
+def _build_remote_url(
+    srv_config, target_alias: str, path: str, query: str, is_database: bool
+) -> str:
     """Generates the absolute upstream endpoint bypassing string concats."""
     base_url = srv_config.url.rstrip("/")
     subpath = path.lstrip("/")
 
-    remote_url = f"{base_url}/api/db/{target_alias}/{subpath}" if is_database else f"{base_url}/api/fs/{target_alias}/{subpath}"
+    remote_url = (
+        f"{base_url}/api/db/{target_alias}/{subpath}"
+        if is_database
+        else f"{base_url}/api/fs/{target_alias}/{subpath}"
+    )
     return f"{remote_url}?{query}" if query else remote_url
+
 
 def _build_proxy_headers(request: Request, srv_config) -> dict:
     """Constructs transmission limits erasing native Host overlays."""
@@ -44,34 +55,50 @@ def _build_proxy_headers(request: Request, srv_config) -> dict:
 
     return headers
 
-async def _stream_proxy_execution(client: httpx.AsyncClient, request: Request, remote_url: str, headers: dict) -> StreamingResponse:
+
+async def _stream_proxy_execution(
+    client: httpx.AsyncClient, request: Request, remote_url: str, headers: dict
+) -> StreamingResponse:
     """Dispatches background streaming sockets returning bound payloads."""
     req = client.build_request(
         request.method,
         remote_url,
         headers=headers,
-        content=request.stream() if request.method in ("POST", "PUT", "PATCH") else None
+        content=request.stream()
+        if request.method in ("POST", "PUT", "PATCH")
+        else None,
     )
 
     try:
         resp = await client.send(req, stream=True)
         pass_headers = {
-            k.lower(): v for k, v in resp.headers.items()
-            if k.lower() not in ("transfer-encoding", "content-encoding", "connection", "content-length")
+            k.lower(): v
+            for k, v in resp.headers.items()
+            if k.lower()
+            not in (
+                "transfer-encoding",
+                "content-encoding",
+                "connection",
+                "content-length",
+            )
         }
 
         return StreamingResponse(
             resp.aiter_bytes(),
             status_code=resp.status_code,
             headers=pass_headers,
-            background=BackgroundTask(resp.aclose)
+            background=BackgroundTask(resp.aclose),
         )
     except httpx.RequestError as req_error:
-        raise NexusGateException(ErrorCodes.FED_SERVER_DOWN, f"Federated server error: {str(req_error)}", 502)
+        raise NexusGateException(
+            ErrorCodes.FED_SERVER_DOWN, f"Federated server error: {str(req_error)}", 502
+        )
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Primary Dispatcher
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _is_safe_url(url: str) -> bool:
     """Blocks SSRF loops and strictly protects internal bogon subnet spaces."""
@@ -89,23 +116,32 @@ def _is_safe_url(url: str) -> bool:
             if ip.is_private or ip.is_loopback or ip.is_link_local:
                 return False
         except ValueError:
-            pass # Domain name, DNS resolution handles standard external routing
+            pass  # Domain name, DNS resolution handles standard external routing
 
         return True
     except Exception:
         return False
 
-async def proxy_request(alias: str, path: str, request: Request, is_database: bool = True) -> StreamingResponse:
+
+async def proxy_request(
+    alias: str, path: str, request: Request, is_database: bool = True
+) -> StreamingResponse:
     """Entrypoint binding exact aliases targeting mapped proxies natively."""
     config = ConfigManager.get()
 
     for srv_alias, srv_config in config.federation.server.items():
         if alias.startswith(f"{srv_alias}_"):
-            target_alias = alias[len(srv_alias)+1:]
-            remote_url = _build_remote_url(srv_config, target_alias, path, request.url.query, is_database)
+            target_alias = alias[len(srv_alias) + 1 :]
+            remote_url = _build_remote_url(
+                srv_config, target_alias, path, request.url.query, is_database
+            )
 
             if not _is_safe_url(remote_url):
-                raise NexusGateException(ErrorCodes.FED_SERVER_DOWN, "SSRF Blocked: Federation target resolves to an internal or restricted network.", 403)
+                raise NexusGateException(
+                    ErrorCodes.FED_SERVER_DOWN,
+                    "SSRF Blocked: Federation target resolves to an internal or restricted network.",
+                    403,
+                )
 
             headers = _build_proxy_headers(request, srv_config)
 
@@ -113,4 +149,8 @@ async def proxy_request(alias: str, path: str, request: Request, is_database: bo
             return await _stream_proxy_execution(client, request, remote_url, headers)
 
     resource_type = "Database" if is_database else "Storage"
-    raise NexusGateException(ErrorCodes.FED_SERVER_DOWN, f"Federated {resource_type} alias '{alias}' not found or unreachable", 404)
+    raise NexusGateException(
+        ErrorCodes.FED_SERVER_DOWN,
+        f"Federated {resource_type} alias '{alias}' not found or unreachable",
+        404,
+    )

@@ -8,22 +8,22 @@ Mounts two FastAPI endpoints forming the MCP transport layer:
 Authentication is enforced manually via header extraction since the MCP SDK
 bypasses FastAPI's Depends() injection by using raw ASGI send/receive.
 """
-import base64
+
 import structlog
 from fastapi import APIRouter, Request
-from mcp.server.sse import SseServerTransport
-from starlette.responses import Response, JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials
+from starlette.responses import JSONResponse, Response
 
 from api.mcp.server import MCPServerManager
-from api.mcp.session_auth import set_mcp_auth, clear_mcp_auth
+from api.mcp.session_auth import clear_mcp_auth, set_mcp_auth
+from config.loader import ConfigManager
+from mcp.server.sse import SseServerTransport
 from server.middleware.auth import (
-    _parse_bearer_token,
     _evaluate_network_bans,
     _get_dynamic_key_context,
     _get_static_key_context,
+    _parse_bearer_token,
 )
-from config.loader import ConfigManager
-from fastapi.security import HTTPAuthorizationCredentials
 
 logger = structlog.get_logger()
 
@@ -39,11 +39,13 @@ class ASGIPassThroughResponse(Response):
     http.response.start after the MCP SDK has already written its own
     response directly through the raw ASGI send callable.
     """
+
     async def __call__(self, scope, receive, send) -> None:
         pass
 
 
 # -- Authentication --------------------------------------------------------
+
 
 def _authenticate_from_request(request: Request) -> None:
     """
@@ -61,14 +63,18 @@ def _authenticate_from_request(request: Request) -> None:
     # Strip "Bearer " prefix and wrap into the expected credential object
     scheme, _, token = auth_header.partition(" ")
     if scheme.lower() != "bearer" or not token:
-        raise _auth_error("Invalid Authorization scheme. Expected 'Bearer <token>'.", 401)
+        raise _auth_error(
+            "Invalid Authorization scheme. Expected 'Bearer <token>'.", 401
+        )
 
     credentials = HTTPAuthorizationCredentials(scheme=scheme, credentials=token)
 
     try:
         key_name, secret = _parse_bearer_token(credentials)
     except Exception:
-        raise _auth_error("Malformed Bearer token. Expected Base64(key_name:secret).", 401)
+        raise _auth_error(
+            "Malformed Bearer token. Expected Base64(key_name:secret).", 401
+        )
 
     config = ConfigManager.get()
 
@@ -91,25 +97,29 @@ def _authenticate_from_request(request: Request) -> None:
 
 class _AuthenticationError(Exception):
     """Internal signal carrying a pre-built JSON error response."""
+
     def __init__(self, response: JSONResponse):
         self.response = response
 
 
 def _auth_error(message: str, status_code: int) -> _AuthenticationError:
     """Constructs a standardized auth rejection."""
-    return _AuthenticationError(JSONResponse(
-        status_code=status_code,
-        content={
-            "success": False,
-            "error": {
-                "code": "MCP_AUTH_FAILED",
-                "message": message,
-            }
-        }
-    ))
+    return _AuthenticationError(
+        JSONResponse(
+            status_code=status_code,
+            content={
+                "success": False,
+                "error": {
+                    "code": "MCP_AUTH_FAILED",
+                    "message": message,
+                },
+            },
+        )
+    )
 
 
 # -- Endpoints -------------------------------------------------------------
+
 
 @router.get("/sse")
 async def handle_sse_connection(request: Request) -> Response:

@@ -8,17 +8,18 @@ pipeline — no query bypasses the AST parser.
 Permission mode and database scope are derived from the authenticated
 session context, not hardcoded.
 """
+
 from __future__ import annotations
 
 import structlog
-from mcp.types import TextContent
 
-from config.loader import ConfigManager
 from api.database.query_parser import validate_query
-from db.dialect.transpiler import transpile_sql
+from api.mcp.session_auth import get_mcp_auth
 from api.mcp.tools.base import EngineResolver, ResultFormatter
 from api.mcp.tools.registry import mcp_tool_registry
-from api.mcp.session_auth import get_mcp_auth
+from config.loader import ConfigManager
+from db.dialect.transpiler import transpile_sql
+from mcp.types import TextContent
 
 logger = structlog.get_logger()
 
@@ -26,6 +27,7 @@ _READ_OPERATIONS = frozenset({"select", "show", "describe"})
 
 
 # -- Scope Enforcement -----------------------------------------------------
+
 
 def _check_database_scope(alias: str) -> bool:
     """Verifies the authenticated session has access to the requested database alias."""
@@ -37,6 +39,7 @@ def _check_database_scope(alias: str) -> bool:
 
 
 # -- Handlers --------------------------------------------------------------
+
 
 async def _list_databases() -> list[TextContent]:
     """Lists database aliases visible to the authenticated session."""
@@ -55,7 +58,12 @@ async def _list_databases() -> list[TextContent]:
 
 async def _list_tables(database: str) -> list[TextContent]:
     if not _check_database_scope(database):
-        return [TextContent(type="text", text=f"Access denied: database '{database}' is outside your scope.")]
+        return [
+            TextContent(
+                type="text",
+                text=f"Access denied: database '{database}' is outside your scope.",
+            )
+        ]
 
     engine = await EngineResolver.require_engine(database)
     tables = await engine.list_tables()
@@ -66,15 +74,24 @@ async def _list_tables(database: str) -> list[TextContent]:
     lines = []
     for table in tables:
         columns = await engine.describe_table(table.name)
-        col_summary = ", ".join(ResultFormatter.format_column_inline(c) for c in columns)
+        col_summary = ", ".join(
+            ResultFormatter.format_column_inline(c) for c in columns
+        )
         lines.append(f"- {table.name}: [{col_summary}]")
 
-    return [TextContent(type="text", text=f"Tables in '{database}':\n" + "\n".join(lines))]
+    return [
+        TextContent(type="text", text=f"Tables in '{database}':\n" + "\n".join(lines))
+    ]
 
 
 async def _describe_table(database: str, table: str) -> list[TextContent]:
     if not _check_database_scope(database):
-        return [TextContent(type="text", text=f"Access denied: database '{database}' is outside your scope.")]
+        return [
+            TextContent(
+                type="text",
+                text=f"Access denied: database '{database}' is outside your scope.",
+            )
+        ]
 
     engine = await EngineResolver.require_engine(database)
     columns = await engine.describe_table(table)
@@ -83,16 +100,25 @@ async def _describe_table(database: str, table: str) -> list[TextContent]:
         return [TextContent(type="text", text=f"Table '{table}' not found.")]
 
     lines = [ResultFormatter.format_column_line(c) for c in columns]
-    return [TextContent(type="text", text=f"Schema for '{database}.{table}':\n" + "\n".join(lines))]
+    return [
+        TextContent(
+            type="text", text=f"Schema for '{database}.{table}':\n" + "\n".join(lines)
+        )
+    ]
 
 
 async def _query_database(database: str, sql: str) -> list[TextContent]:
     if not _check_database_scope(database):
-        return [TextContent(type="text", text=f"Access denied: database '{database}' is outside your scope.")]
+        return [
+            TextContent(
+                type="text",
+                text=f"Access denied: database '{database}' is outside your scope.",
+            )
+        ]
 
     # Derive the permission mode from the authenticated session, not a hardcoded default
     auth = get_mcp_auth()
-    user_mode = auth.mode.value if hasattr(auth.mode, 'value') else str(auth.mode)
+    user_mode = auth.mode.value if hasattr(auth.mode, "value") else str(auth.mode)
 
     engine, db_config = await EngineResolver.require_engine_and_config(database)
 
@@ -108,6 +134,7 @@ async def _query_database(database: str, sql: str) -> list[TextContent]:
 
 # -- Registration ----------------------------------------------------------
 
+
 def register_database_tools() -> None:
     """Registers DB capabilities into the global tool registry."""
 
@@ -115,7 +142,7 @@ def register_database_tools() -> None:
         name="list_databases",
         description="Lists all database aliases configured and available natively in NexusGate.",
         input_schema={"type": "object", "properties": {}},
-        handler=_list_databases
+        handler=_list_databases,
     )
 
     mcp_tool_registry.register(
@@ -124,9 +151,9 @@ def register_database_tools() -> None:
         input_schema={
             "type": "object",
             "properties": {"database": {"type": "string"}},
-            "required": ["database"]
+            "required": ["database"],
         },
-        handler=_list_tables
+        handler=_list_tables,
     )
 
     mcp_tool_registry.register(
@@ -134,13 +161,10 @@ def register_database_tools() -> None:
         description="Extracts detailed column definitions (types, PKs, Nullability) for a specific table.",
         input_schema={
             "type": "object",
-            "properties": {
-                "database": {"type": "string"},
-                "table": {"type": "string"}
-            },
-            "required": ["database", "table"]
+            "properties": {"database": {"type": "string"}, "table": {"type": "string"}},
+            "required": ["database", "table"],
         },
-        handler=_describe_table
+        handler=_describe_table,
     )
 
     mcp_tool_registry.register(
@@ -150,9 +174,9 @@ def register_database_tools() -> None:
             "type": "object",
             "properties": {
                 "database": {"type": "string"},
-                "sql": {"type": "string", "description": "Raw SQL query string"}
+                "sql": {"type": "string", "description": "Raw SQL query string"},
             },
-            "required": ["database", "sql"]
+            "required": ["database", "sql"],
         },
-        handler=_query_database
+        handler=_query_database,
     )
