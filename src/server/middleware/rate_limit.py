@@ -121,7 +121,7 @@ class RateLimitMiddleware:
         # Resolve config and backend class ONCE at startup - never per-request
         config = ConfigManager.get()
         self._enabled = config.rate_limit.enabled
-        self._allowed_ips = config.server.allowed_ips
+        self._allowed_ips = set(config.server.allowed_ips)
         self._window = config.rate_limit.window
         self._burst = config.rate_limit.burst
         self._penalty_cooldown = config.rate_limit.penalty_cooldown

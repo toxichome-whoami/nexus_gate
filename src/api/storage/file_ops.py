@@ -13,14 +13,6 @@ from utils.size_parser import format_size
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _get_directory_count(path: str) -> int:
-    """Safely intercepts local permission or IO errors reading nested bounds."""
-    try:
-        return len(os.listdir(path))
-    except Exception:
-        return 0
-
-
 def _enrich_file_metrics(stat, path: str, res: dict) -> None:
     """Attaches human-readable structures for explicit file nodes natively."""
     res["size"] = [stat.st_size, format_size(stat.st_size)]
@@ -33,33 +25,74 @@ def _enrich_file_metrics(stat, path: str, res: dict) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _stat_to_file_info(path: str, name: str, stat_result) -> Dict[str, Any]:
+    """Build file info dict from an already-obtained stat result — zero extra syscalls."""
+    import stat as stat_m
+
+    is_dir = stat_m.S_ISDIR(stat_result.st_mode)
+
+    res: Dict[str, Any] = {
+        "name": name,
+        "type": "directory" if is_dir else "file",
+        "modified": datetime.fromtimestamp(stat_result.st_mtime).isoformat(),
+        "created": datetime.fromtimestamp(stat_result.st_ctime).isoformat(),
+    }
+
+    if not is_dir:
+        _enrich_file_metrics(stat_result, path, res)
+    else:
+        res["items_count"] = 0
+
+    return res
+
+
 async def get_file_info(path: str) -> Dict[str, Any]:
-    if not os.path.exists(path):
+    """Get file info with blocking I/O offloaded to a threadpool."""
+    try:
+        stat_result = await asyncio.to_thread(os.stat, path)
+    except FileNotFoundError:
         raise NexusGateException(
             ErrorCodes.FS_PATH_NOT_FOUND, f"Path not found: {path}", 404
         )
 
-    stat = os.stat(path)
-    is_dir = os.path.isdir(path)
+    name = os.path.basename(path)
+    return _stat_to_file_info(path, name, stat_result)
+
+
+def build_file_info_from_entry(entry: "os.DirEntry[str]") -> Dict[str, Any]:
+    """Build file info from a scandir DirEntry — zero syscalls (scandir pre-fetches).
+    This is a sync helper meant to be called inside a threadpool or from scandir."""
+    try:
+        stat_result = entry.stat(follow_symlinks=False)
+    except (OSError, PermissionError):
+        return {
+            "name": entry.name,
+            "type": "unknown",
+            "size": [0, "0 B"],
+            "mime_type": "application/octet-stream",
+            "modified": datetime.now().isoformat(),
+            "created": datetime.now().isoformat(),
+        }
+
+    path = entry.path
+    is_dir = entry.is_dir(follow_symlinks=False)
 
     res: Dict[str, Any] = {
-        "name": os.path.basename(path),
+        "name": entry.name,
         "type": "directory" if is_dir else "file",
-        "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-        "created": datetime.fromtimestamp(stat.st_ctime).isoformat(),
+        "modified": datetime.fromtimestamp(stat_result.st_mtime).isoformat(),
+        "created": datetime.fromtimestamp(stat_result.st_ctime).isoformat(),
     }
 
     if not is_dir:
-        _enrich_file_metrics(stat, path, res)
-    else:
-        res["items_count"] = _get_directory_count(path)
+        _enrich_file_metrics(stat_result, path, res)
 
     return res
 
 
 async def rename_path(source: str, target: str) -> None:
     try:
-        os.rename(source, target)
+        await asyncio.to_thread(os.rename, source, target)
     except FileNotFoundError:
         raise NexusGateException(
             ErrorCodes.FS_PATH_NOT_FOUND,
@@ -76,7 +109,8 @@ async def rename_path(source: str, target: str) -> None:
 
 async def copy_path(source: str, target: str) -> None:
     try:
-        if os.path.isdir(source):
+        is_dir = await asyncio.to_thread(os.path.isdir, source)
+        if is_dir:
             await asyncio.to_thread(shutil.copytree, source, target)
         else:
             await asyncio.to_thread(shutil.copy2, source, target)
@@ -97,7 +131,7 @@ async def delete_path(source: str) -> None:
         if os.path.isdir(source):
             await asyncio.to_thread(shutil.rmtree, source)
         else:
-            os.remove(source)
+            await asyncio.to_thread(os.remove, source)
     except Exception as e:
         raise NexusGateException(
             ErrorCodes.SERVER_INTERNAL, f"Failed to detach node directly: {str(e)}", 500
@@ -106,7 +140,7 @@ async def delete_path(source: str) -> None:
 
 async def mkdir(path: str) -> None:
     try:
-        os.makedirs(path, exist_ok=True)
+        await asyncio.to_thread(os.makedirs, path, exist_ok=True)
     except Exception as e:
         raise NexusGateException(
             ErrorCodes.SERVER_INTERNAL, f"Failed to partition structure: {str(e)}", 500

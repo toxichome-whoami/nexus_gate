@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import os
+import time
 from typing import Optional
 
 import aiofiles
@@ -23,6 +24,7 @@ from webhook.emitter import WebhookTrigger, emit_event
 
 from .archive import stream_zip_folder
 from .file_ops import (
+    build_file_info_from_entry,
     bulk_delete_paths,
     bulk_move_paths,
     copy_path,
@@ -520,9 +522,7 @@ def _scan_directory_sync(storage_path: str) -> tuple[int, int]:
 
 async def _calculate_storage_usage(storage_path: str, limit_str: str) -> dict:
     """Calculates real disk usage for a storage volume. Cached for 30s, scanned in a threadpool."""
-    import time as _time
-
-    now = _time.monotonic()
+    now = time.monotonic()
     cached = _usage_cache.get(storage_path)
     if cached and (now - cached[0]) < _USAGE_CACHE_TTL:
         return cached[1]
@@ -603,32 +603,36 @@ async def list_folder(
         return await proxy_request(alias, "list", request, False)
 
     target_path = _get_storage_path(alias, path, auth)
-    if not os.path.exists(target_path):
-        raise NexusGateException(ErrorCodes.FS_PATH_NOT_FOUND, "Missing Node", 404)
-    if not os.path.isdir(target_path):
-        raise NexusGateException(
-            ErrorCodes.FS_PATH_NOT_FOUND, "Path rejects dict schema.", 400
-        )
 
-    # Use os.scandir for better performance, but fallback to sorting listdir
-    try:
-        all_items = os.listdir(target_path)
-    except Exception as e:
-        raise NexusGateException(
-            ErrorCodes.SERVER_INTERNAL, f"Failed to list directory: {str(e)}", 500
-        )
+    # Single-pass scandir with threadpool — replaces os.listdir + os.path.exists + os.path.isdir
+    def _scan_directory():
+        try:
+            entries = list(os.scandir(target_path))
+        except FileNotFoundError:
+            raise NexusGateException(ErrorCodes.FS_PATH_NOT_FOUND, "Missing Node", 404)
+        except NotADirectoryError:
+            raise NexusGateException(
+                ErrorCodes.FS_PATH_NOT_FOUND, "Path rejects dict schema.", 400
+            )
+        except PermissionError:
+            raise NexusGateException(
+                ErrorCodes.AUTH_SCOPE_DENIED, "Permission denied reading path.", 403
+            )
+        except Exception as e:
+            raise NexusGateException(
+                ErrorCodes.SERVER_INTERNAL,
+                f"Failed to list directory: {str(e)}",
+                500,
+            )
 
-    total_items = len(all_items)
+        entries.sort(key=lambda e: e.name)
+        total = len(entries)
+        page = entries[offset : offset + limit]
 
-    # Sort for consistent pagination
-    all_items.sort()
+        items = [build_file_info_from_entry(e) for e in page]
+        return total, items
 
-    # Slice the page
-    page_items = all_items[offset : offset + limit]
-
-    items = [
-        await get_file_info(os.path.join(target_path, item)) for item in page_items
-    ]
+    total_items, items = await asyncio.to_thread(_scan_directory)
 
     return success_response(
         request,

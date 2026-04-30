@@ -7,8 +7,8 @@ from config.loader import ConfigManager
 
 
 def _optimize_garbage_collection():
-    """Twitches GC thresholds favoring eager memory deallocation over CPU speed."""
-    gc.set_threshold(300, 5, 5)
+    """Optimizes GC for high-throughput API serving — reduces pause frequency."""
+    gc.set_threshold(700, 10, 10)
 
 
 def _resolve_config_path() -> str:
