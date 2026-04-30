@@ -65,8 +65,9 @@ class MySQLEngine(DatabaseEngine):
             pool_size=config.pool_min,
             max_overflow=overflow_buffer,
             pool_timeout=config.connection_timeout,
-            pool_recycle=config.max_lifetime,
+            pool_recycle=min(config.max_lifetime, 300),
             pool_pre_ping=True,
+            pool_use_lifo=True,
         )
 
     async def connect(self) -> None:
@@ -74,7 +75,12 @@ class MySQLEngine(DatabaseEngine):
         pass
 
     async def disconnect(self) -> None:
-        await self.engine.dispose()
+        try:
+            await self.engine.dispose()
+        except (RuntimeError, Exception):
+            # aiomysql + uvloop race: transport already closed before
+            # graceful termination packet can be sent — safe to ignore.
+            pass
 
     async def health_check(self) -> bool:
         try:
