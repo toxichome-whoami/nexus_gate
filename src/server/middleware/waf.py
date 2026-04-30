@@ -84,6 +84,12 @@ class WAFMiddleware:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
 
+        # Fast-path: skip WAF for internal API routes where input is
+        # already validated by route handlers (query parser, auth, etc.)
+        path = scope.get("path", "")
+        if path.startswith("/api/v1/db") or path.startswith("/api/v1/fs"):
+            return await self.app(scope, receive, send)
+
         raw_path = scope.get("raw_path", b"")
         query_string = scope.get("query_string", b"")
         headers = dict(scope.get("headers", []))

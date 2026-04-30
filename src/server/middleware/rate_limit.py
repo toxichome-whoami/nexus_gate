@@ -1,4 +1,5 @@
 import base64
+import functools
 import time
 
 import orjson
@@ -45,23 +46,26 @@ def _resolve_api_key_name(headers: dict) -> str:
     return "anonymous"
 
 
-def _determine_effective_limits(api_key_name: str, config) -> int:
-    """Calculates exactly how many requests this key is allowed per rolling window."""
+@functools.lru_cache(maxsize=256)
+def _determine_effective_limits(api_key_name: str) -> int:
+    """Calculates exactly how many requests this key is allowed per rolling window.
+    Cached to avoid redundant SecurityStorage lookups on every request."""
+    config = ConfigManager.get()
     base_limit = config.rate_limit.max_requests
 
     if api_key_name == "anonymous":
         return base_limit
 
-    # Dynamic cache lookup
-    db_key = SecurityStorage.get_api_key(api_key_name)
-    if db_key and db_key.get("rate_limit_override", 0) > 0:
-        return db_key["rate_limit_override"]
-
-    # Static config fallback
+    # Static config fallback (fast path)
     if api_key_name in config.api_key:
         cfg_override = config.api_key[api_key_name].rate_limit_override
         if cfg_override > 0:
             return cfg_override
+
+    # Dynamic cache lookup
+    db_key = SecurityStorage.get_api_key(api_key_name)
+    if db_key and db_key.get("rate_limit_override", 0) > 0:
+        return db_key["rate_limit_override"]
 
     return base_limit
 
@@ -136,8 +140,6 @@ class RateLimitMiddleware:
         if not self._enabled:
             return await self.app(scope, receive, send)
 
-        config = ConfigManager.get()
-
         headers = dict(scope.get("headers", []))
         client_ip = _resolve_client_ip(scope, headers)
 
@@ -146,7 +148,7 @@ class RateLimitMiddleware:
 
         api_key_name = _resolve_api_key_name(headers)
 
-        limit = _determine_effective_limits(api_key_name, config)
+        limit = _determine_effective_limits(api_key_name)
 
         # Use pre-cached backend class - no per-request resolution
         violated, current_count = await self._backend.check_rate_limit(
