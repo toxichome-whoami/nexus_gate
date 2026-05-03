@@ -33,6 +33,7 @@ logs/
 # IDE
 .vscode/
 .idea/
+.opencode/
 *.swp
 *.swo
 
