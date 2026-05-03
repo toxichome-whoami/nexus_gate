@@ -1,0 +1,20 @@
+# DO NOT REMOVE OR MODIFY. CLOUDLINUX ENV VARS CONFIGURATION BEGIN
+<IfModule Litespeed>
+</IfModule>
+# DO NOT REMOVE OR MODIFY. CLOUDLINUX ENV VARS CONFIGURATION END
+
+RewriteEngine On
+
+# Force HTTPS
+RewriteCond %{HTTPS} !=on
+RewriteRule ^(.*)$ https://%{HTTP_HOST}/$1 [R=301,L]
+
+# Reverse Proxy - Send all traffic to Python app on port 4500 (local ONLY)
+RewriteRule ^(.*)$ http://127.0.0.1:4500/$1 [P,L]
+
+# Proxy headers to forward real visitor IP to the app
+<IfModule mod_headers.c>
+    RequestHeader set X-Forwarded-Proto "https"
+    RequestHeader set X-Forwarded-Port "443"
+    RequestHeader set X-Forwarded-For "%{REMOTE_ADDR}e"
+</IfModule>
