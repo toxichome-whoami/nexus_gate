@@ -11,6 +11,8 @@ from config.loader import ConfigManager
 
 _SERVER_VERSION = "1.0.2"
 _SERVER_HOST_CACHE: Optional[str] = None
+_TIMESTAMP_CACHE: str = ""
+_TIMESTAMP_CACHE_LAST: float = 0
 
 
 def _get_server_name() -> str:
@@ -19,6 +21,16 @@ def _get_server_name() -> str:
     if _SERVER_HOST_CACHE is None:
         _SERVER_HOST_CACHE = ConfigManager.get().server.host
     return _SERVER_HOST_CACHE
+
+
+def _get_timestamp() -> str:
+    """Cached ISO timestamp, refreshed once per second."""
+    global _TIMESTAMP_CACHE, _TIMESTAMP_CACHE_LAST
+    now = time.time()
+    if now - _TIMESTAMP_CACHE_LAST >= 1.0:
+        _TIMESTAMP_CACHE = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(now))
+        _TIMESTAMP_CACHE_LAST = now
+    return _TIMESTAMP_CACHE
 
 
 def _build_meta(request: Request, start_time: Optional[float] = None) -> Dict[str, Any]:
@@ -35,7 +47,7 @@ def _build_meta(request: Request, start_time: Optional[float] = None) -> Dict[st
 
     return {
         "request_id": getattr(request.state, "request_id", "-"),
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
+        "timestamp": _get_timestamp(),
         "duration_ms": round(duration_ms, 2),
         "server": _get_server_name(),
         "version": _SERVER_VERSION,

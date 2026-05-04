@@ -14,7 +14,7 @@ from utils.types import AuthContext, ServerMode
 security = HTTPBearer(auto_error=False)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Helper Functions
+# Module-level caches
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -28,6 +28,17 @@ def _record_auth_failure():
         pass
 
 
+def _resolve_client_ip(request: Request) -> str:
+    client_ip = (
+        request.headers.get("X-Forwarded-For")
+        or request.headers.get("X-Real-IP")
+        or (request.client.host if request.client else "unknown")
+    )
+    if isinstance(client_ip, str) and "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+    return client_ip
+
+
 def _evaluate_network_bans(request: Request, key_name: str):
     """Executes pre-authorization checks against network blocks and IP bans."""
     is_banned, ban_reason = BanList.is_key_banned(key_name)
@@ -38,15 +49,7 @@ def _evaluate_network_bans(request: Request, key_name: str):
             status_code=403,
         )
 
-    # Resolve active client IP safely bypassing proxies
-    client_ip = (
-        request.headers.get("X-Forwarded-For")
-        or request.headers.get("X-Real-IP")
-        or (request.client.host if request.client else "unknown")
-    )
-    if isinstance(client_ip, str) and "," in client_ip:
-        client_ip = client_ip.split(",")[0].strip()
-
+    client_ip = _resolve_client_ip(request)
     ip_banned, ip_reason = BanList.is_ip_banned(client_ip)
     if ip_banned:
         raise NexusGateException(
@@ -185,13 +188,19 @@ async def get_auth_context(
     credentials: HTTPAuthorizationCredentials = Security(security),
 ) -> AuthContext:
     """Resolves security context for a request by combining all available mechanisms."""
+    cached = getattr(request.state, "auth_context", None)
+    if cached is not None:
+        return cached
+
     config = ConfigManager.get()
 
     # 1. Routing Edge Case: Handle native federation node bypasses
     if request.headers.get("X-Federation-Secret") and request.headers.get(
         "X-Federation-Node"
     ):
-        return _get_federation_context(request, config)
+        ctx = _get_federation_context(request, config)
+        request.state.auth_context = ctx
+        return ctx
 
     # 2. Extract standard API tokens
     key_name, secret = _parse_bearer_token(credentials)
@@ -202,10 +211,13 @@ async def get_auth_context(
     # 4. Resolve Context
     dynamic_context = _get_dynamic_key_context(key_name, secret)
     if dynamic_context:
+        request.state.auth_context = dynamic_context
         return dynamic_context
 
     # 5. Fallback statically
-    return _get_static_key_context(key_name, secret, config)
+    ctx = _get_static_key_context(key_name, secret, config)
+    request.state.auth_context = ctx
+    return ctx
 
 
 async def require_admin(auth: AuthContext = Depends(get_auth_context)) -> AuthContext:

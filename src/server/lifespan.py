@@ -12,6 +12,13 @@ from logger.rotator import log_rotator_worker
 from security.storage import SecurityStorage
 from webhook.dispatcher import dispatcher_worker
 
+# Silently refresh module-level feature flags in db handlers on each config reload
+try:
+    import api.database.handlers as _db_handlers
+    _db_handlers._refresh_feature_flags()
+except Exception:
+    pass
+
 logger = structlog.get_logger()
 
 # ─────────────────────────────────────────────────────────────────────────────

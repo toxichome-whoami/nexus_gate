@@ -116,11 +116,11 @@ class DatabaseDefConfig(BaseModel):
     engine: DbEngineType
     url: str
     mode: ServerMode = ServerMode.READWRITE
-    pool_min: int = 2
-    pool_max: int = 20
-    connection_timeout: int = 5
-    idle_timeout: int = 300
-    max_lifetime: int = 1800
+    pool_min: int = 5
+    pool_max: int = 50
+    connection_timeout: int = 10
+    idle_timeout: int = 600
+    max_lifetime: int = 3600
     query_whitelist: Optional[List[str]] = None
     query_blacklist: Optional[List[str]] = Field(
         default_factory=lambda: ["DROP", "TRUNCATE", "ALTER"]

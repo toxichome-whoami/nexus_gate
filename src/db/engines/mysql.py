@@ -65,9 +65,9 @@ class MySQLEngine(DatabaseEngine):
             pool_size=config.pool_min,
             max_overflow=overflow_buffer,
             pool_timeout=config.connection_timeout,
-            pool_recycle=min(config.max_lifetime, 300),
-            pool_pre_ping=True,
-            pool_use_lifo=True,
+            pool_recycle=config.max_lifetime,
+            pool_pre_ping=False,
+            pool_use_lifo=False,
         )
 
     async def connect(self) -> None:

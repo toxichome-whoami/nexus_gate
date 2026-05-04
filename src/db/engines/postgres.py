@@ -74,7 +74,7 @@ class PostgresEngine(DatabaseEngine):
             max_overflow=overflow_buffer,
             pool_timeout=config.connection_timeout,
             pool_recycle=config.max_lifetime,
-            pool_pre_ping=True,
+            pool_pre_ping=False,
         )
 
     async def connect(self) -> None:

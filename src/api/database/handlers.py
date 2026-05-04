@@ -29,19 +29,32 @@ from webhook.emitter import WebhookTrigger, emit_event
 from .router import router
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Module-level feature flags (checked once at import, never per-request)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_FEDERATION_ENABLED: bool = False
+_FEDERATION_SERVERS: tuple = ()
+_WEBHOOK_ENABLED: bool = False
+
+
+def _refresh_feature_flags():
+    global _FEDERATION_ENABLED, _FEDERATION_SERVERS, _WEBHOOK_ENABLED
+    config = ConfigManager.get()
+    _FEDERATION_ENABLED = bool(config.features.federation and config.federation.enabled)
+    _FEDERATION_SERVERS = tuple(config.federation.server.keys()) if _FEDERATION_ENABLED else ()
+    _WEBHOOK_ENABLED = bool(config.features.webhook and config.webhooks.enabled)
+
+_refresh_feature_flags()
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Core Extraction Procedures
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def _is_federated(alias: str) -> bool:
-    """Detects implicit federated sub-node calls cleanly."""
-    config = ConfigManager.get()
-    if not config.features.federation or not config.federation.enabled:
+    if not _FEDERATION_ENABLED:
         return False
-    return any(
-        alias.startswith(f"{srv_alias}_")
-        for srv_alias in config.federation.server.keys()
-    )
+    return any(alias.startswith(f"{srv}_") for srv in _FEDERATION_SERVERS)
 
 
 async def get_db_engine(db_name: str, auth: AuthContext):
@@ -71,8 +84,7 @@ def _emit_db_webhook_event(
     affected_rows: int,
 ):
     """Transmits real-time mutation state via isolated webhooks."""
-    config = ConfigManager.get()
-    if not config.features.webhook or not config.webhooks.enabled:
+    if not _WEBHOOK_ENABLED:
         return
 
     trigger_context = WebhookTrigger(
@@ -274,9 +286,8 @@ class QueryExecutionPipeline:
 
         result = await engine.execute(transpiled_sql, params)
 
-        # Fast-path: skip webhook entirely when feature is disabled
-        config = ConfigManager.get()
-        if config.features.webhook and config.webhooks.enabled:
+        # Fast-path: skip webhook entirely when feature is disabled (checked at module level)
+        if _WEBHOOK_ENABLED:
             webhook_action = (
                 "SELECT"
                 if operations in ("select", "show", "describe")
@@ -362,7 +373,7 @@ async def list_databases(
             }
         )
 
-    if config.features.federation and config.federation.enabled:
+    if _FEDERATION_ENABLED:
         state = FederationState()
         tasks = [
             _fetch_remote_databases(alias, srv_state, active_dbs, auth)
