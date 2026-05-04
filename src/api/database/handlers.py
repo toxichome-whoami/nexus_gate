@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import hashlib
 import json
 from typing import Any
 
@@ -19,6 +20,7 @@ from api.errors import ErrorCodes, NexusGateException
 from api.federation.proxy import proxy_request
 from api.federation.sync import FederationState
 from api.responses import success_response
+from cache import CacheManager
 from config.loader import ConfigManager
 from db.dialect.transpiler import transpile_sql
 from db.pool import DatabasePoolManager
@@ -35,14 +37,16 @@ from .router import router
 _FEDERATION_ENABLED: bool = False
 _FEDERATION_SERVERS: tuple = ()
 _WEBHOOK_ENABLED: bool = False
+_QUERY_CACHE_ENABLED: bool = False
 
 
 def _refresh_feature_flags():
-    global _FEDERATION_ENABLED, _FEDERATION_SERVERS, _WEBHOOK_ENABLED
+    global _FEDERATION_ENABLED, _FEDERATION_SERVERS, _WEBHOOK_ENABLED, _QUERY_CACHE_ENABLED
     config = ConfigManager.get()
     _FEDERATION_ENABLED = bool(config.features.federation and config.federation.enabled)
     _FEDERATION_SERVERS = tuple(config.federation.server.keys()) if _FEDERATION_ENABLED else ()
     _WEBHOOK_ENABLED = bool(config.features.webhook and config.webhooks.enabled)
+    _QUERY_CACHE_ENABLED = bool(config.cache.enabled and config.cache.query_cache)
 
 _refresh_feature_flags()
 
@@ -276,9 +280,17 @@ class QueryExecutionPipeline:
         safe_sql, operations, target_table = validate_query(
             sql, db_cfg, auth.mode.value
         )
-        # Skip transpilation when source matches target dialect (always true for
-        # non-federated queries — db_cfg.engine == engine.dialect). Transpilation
-        # is only needed when federating across different engine types.
+
+        is_read = operations in ("select", "show", "describe")
+        cache_key = None
+        if is_read and _QUERY_CACHE_ENABLED:
+            cache_key = "qc:" + hashlib.md5(
+                f"{db_name}|{safe_sql}|{json.dumps(params, sort_keys=True, default=str)}".encode()
+            ).hexdigest()
+            cached = await CacheManager.get(cache_key)
+            if cached is not None:
+                return cached
+
         if db_cfg.engine.value == engine.dialect:
             transpiled_sql = safe_sql
         else:
@@ -286,11 +298,10 @@ class QueryExecutionPipeline:
 
         result = await engine.execute(transpiled_sql, params)
 
-        # Fast-path: skip webhook entirely when feature is disabled (checked at module level)
         if _WEBHOOK_ENABLED:
             webhook_action = (
                 "SELECT"
-                if operations in ("select", "show", "describe")
+                if is_read
                 else operations.upper()
             )
             _emit_db_webhook_event(
@@ -302,11 +313,16 @@ class QueryExecutionPipeline:
                 result.affected_rows or 0,
             )
 
-        return {
+        response = {
             "columns": result.columns,
             "rows": result.rows,
             "affected_rows": result.affected_rows,
         }
+
+        if is_read and _QUERY_CACHE_ENABLED:
+            await CacheManager.set(cache_key, response)
+
+        return response
 
     @staticmethod
     async def run_bulk_inserts(
