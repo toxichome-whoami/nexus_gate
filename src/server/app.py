@@ -2,6 +2,7 @@ import os
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -80,6 +81,7 @@ def _attach_middlewares(app: FastAPI):
     setup_cors(app)
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

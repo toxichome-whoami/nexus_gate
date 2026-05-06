@@ -19,7 +19,7 @@ from api.database.schemas import (
 from api.errors import ErrorCodes, NexusGateException
 from api.federation.proxy import proxy_request
 from api.federation.sync import FederationState
-from api.responses import success_response
+from api.responses import cacheable_response, success_response
 from cache import CacheManager
 from config.loader import ConfigManager
 from db.dialect.transpiler import transpile_sql
@@ -319,7 +319,7 @@ class QueryExecutionPipeline:
             "affected_rows": result.affected_rows,
         }
 
-        if is_read and _QUERY_CACHE_ENABLED:
+        if is_read and _QUERY_CACHE_ENABLED and cache_key is not None:
             await CacheManager.set(cache_key, response)
 
         return response
@@ -398,7 +398,7 @@ async def list_databases(
         if tasks:
             await asyncio.gather(*tasks)
 
-    return success_response(request, {"databases": active_dbs})
+    return cacheable_response(request, {"databases": active_dbs}, max_age=30)
 
 
 @router.get("/{db_name}/tables")
@@ -439,7 +439,7 @@ async def list_tables(
             }
         )
 
-    return success_response(request, {"database": db_name, "tables": formatted_tables})
+    return cacheable_response(request, {"database": db_name, "tables": formatted_tables}, max_age=30)
 
 
 @router.post("/{db_name}/query")
@@ -490,7 +490,7 @@ async def get_rows(
         data = await QueryExecutionPipeline.run_query(
             engine, db_cfg, auth, request, db_name, raw_sql, sql_params
         )
-        return success_response(request, data["rows"])
+        return cacheable_response(request, data["rows"], max_age=5)
     except Exception as select_error:
         raise NexusGateException(ErrorCodes.DB_QUERY_FAILED, str(select_error), 500)
 

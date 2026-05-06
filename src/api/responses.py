@@ -2,6 +2,7 @@ import time
 from typing import Any, Dict, Optional
 
 from fastapi import Request
+from fastapi.responses import JSONResponse
 
 from config.loader import ConfigManager
 
@@ -88,3 +89,18 @@ def error_response(
         "error": error,
         "meta": _build_meta(request, start_time),
     }
+
+
+def cacheable_response(
+    request: Request,
+    data: Any,
+    max_age: int = 30,
+    links: Optional[Dict[str, str]] = None,
+    start_time: Optional[float] = None,
+) -> JSONResponse:
+    """Returns a JSON response with Cache-Control headers for GET endpoints."""
+    body = success_response(request, data, links, start_time)
+    return JSONResponse(
+        content=body,
+        headers={"Cache-Control": f"public, max-age={max_age}"},
+    )

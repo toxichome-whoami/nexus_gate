@@ -99,21 +99,28 @@ class ConfigManager:
                 for change, path in changes:
                     if os.path.basename(path) == target_file:
                         logger.info("Config file modification detected, refreshing")
-                        cls._handle_hot_reload()
+                        await cls._handle_hot_reload()
                         break
 
         except asyncio.CancelledError:
             logger.info("Config watcher daemon stopped gracefully")
 
     @classmethod
-    def _handle_hot_reload(cls):
+    async def _handle_hot_reload(cls):
         """Attempts isolated validation bypass of new file state before replacing memory."""
         try:
-            new_payload = _parse_toml_file(cls._config_path, exit_on_error=False)
+            new_payload = await asyncio.to_thread(_parse_toml_file, cls._config_path, False)
             new_validated = NexusGateConfig(**new_payload)
 
-            # old_config = cls._config  # Accessible for diffing later if needed
             cls._config = new_validated
+
+            # Refresh module-level feature flags in dependent modules
+            try:
+                import api.database.handlers as _dbh
+                _dbh._refresh_feature_flags()
+            except Exception:
+                pass
+
             logger.info("Config hot-reloaded successfully on-the-fly")
         except Exception as runtime_error:
             logger.error(
