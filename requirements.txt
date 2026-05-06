@@ -20,5 +20,5 @@ aiomysql>=0.2.0
 aiosqlite>=0.20.0
 redis[hiredis]>=5.0.0
 Pillow>=10.2.0
-orjson
-httptools
+orjson>=3.9.15
+httptools>=0.6.1

@@ -3,7 +3,7 @@ import os
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, ORJSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api import database, federation, storage
@@ -91,9 +91,9 @@ def _attach_middlewares(app: FastAPI):
 
 def _build_error_response(
     request: Request, status_code: int, code: str, message: str, details=None
-) -> JSONResponse:
+) -> ORJSONResponse:
     """Standardizes JSON response structures for server errors."""
-    return JSONResponse(
+    return ORJSONResponse(
         status_code=status_code,
         content={
             "success": False,
