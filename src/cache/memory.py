@@ -21,18 +21,17 @@ def _resolve_cache_capacity_heuristic(config) -> int:
 
 
 def _apply_penalty_violation(
-    cache: TTLCache, limits_key: str, penalty_key: str
+    cache: TTLCache, limits_key: str, penalty_key: str, penalty_threshold: int
 ) -> None:
     """Tracks sequential IP lockouts, generating hard penalties when breached."""
     violation_tracker_key = f"rl:violations:{limits_key}"
     violations = cache.get(violation_tracker_key, 0) + 1
     cache[violation_tracker_key] = violations
 
-    if violations == 10:
+    if violations >= penalty_threshold:
         cache[penalty_key] = True
-        logger.warning("Applied IP penalty in memory boundary", key=penalty_key)
-    elif violations > 10:
-        cache[penalty_key] = True
+        if violations == penalty_threshold:
+            logger.warning("Applied IP penalty in memory boundary", key=penalty_key)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -110,6 +109,7 @@ class MemoryCache:
         penalty_key: str,
         burst: int,
         penalty_cooldown: int,
+        penalty_threshold: int = 10,
     ) -> tuple[bool, int]:
         """Atomically evaluates limits using a flat counter+expiry pattern — O(1) memory per IP regardless of attack volume."""
         now = time.time()
@@ -134,7 +134,7 @@ class MemoryCache:
         cache[count_key] = count
 
         if count > limit + burst:
-            _apply_penalty_violation(cache, limits_key, penalty_key)
+            _apply_penalty_violation(cache, limits_key, penalty_key, penalty_threshold)
             return True, count
 
         return False, count

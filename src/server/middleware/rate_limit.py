@@ -120,6 +120,7 @@ class RateLimitMiddleware:
         "_window",
         "_burst",
         "_penalty_cooldown",
+        "_penalty_threshold",
     )
 
     def __init__(self, app: ASGIApp):
@@ -131,6 +132,7 @@ class RateLimitMiddleware:
         self._window = config.rate_limit.window
         self._burst = config.rate_limit.burst
         self._penalty_cooldown = config.rate_limit.penalty_cooldown
+        self._penalty_threshold = config.rate_limit.penalty_threshold
         if config.rate_limit.backend == "redis":
             self._backend = RedisCache
         elif config.rate_limit.backend == "sqlite":
@@ -176,6 +178,7 @@ class RateLimitMiddleware:
             penalty_key=f"penalty:{client_ip}",
             burst=self._burst,
             penalty_cooldown=self._penalty_cooldown,
+            penalty_threshold=self._penalty_threshold,
         )
 
         if violated:

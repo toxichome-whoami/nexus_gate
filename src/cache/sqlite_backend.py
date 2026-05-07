@@ -37,6 +37,7 @@ async def _enforce_rate_penalty(
     now: float,
     window: int,
     penalty_cooldown: int,
+    penalty_threshold: int,
 ) -> None:
     """Parses previous violations incrementing or hard-banning connection signatures."""
     violation_key = f"rl:violations:{limits_key}"
@@ -59,7 +60,7 @@ async def _enforce_rate_penalty(
     )
 
     # Commit absolute ban if tolerance exceeded
-    if v_count >= 10:
+    if v_count >= penalty_threshold:
         await db.execute(
             "INSERT OR REPLACE INTO cache (key, value, expires_at) VALUES (?, ?, ?)",
             (penalty_key, orjson.dumps(True), now + penalty_cooldown),
@@ -175,6 +176,7 @@ class SQLiteCache:
         penalty_key: str,
         burst: int,
         penalty_cooldown: int,
+        penalty_threshold: int = 10,
     ) -> tuple[bool, int]:
         """Atomically evaluates database window checks guaranteeing cross-worker synchronization."""
         now = time.time()
@@ -201,7 +203,7 @@ class SQLiteCache:
 
                     if count >= limit + burst:
                         await _enforce_rate_penalty(
-                            db, limits_key, penalty_key, now, window, penalty_cooldown
+                            db, limits_key, penalty_key, now, window, penalty_cooldown, penalty_threshold
                         )
                         await db.commit()
                         return True, count

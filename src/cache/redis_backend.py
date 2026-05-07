@@ -50,7 +50,7 @@ return {0, current_count + 1}
 
 
 async def _handle_penalty_application(
-    client: Any, limits_key: str, penalty_key: str, window: int, penalty_cooldown: int
+    client: Any, limits_key: str, penalty_key: str, window: int, penalty_cooldown: int, penalty_threshold: int
 ) -> None:
     """Manages atomic incrementation and expiration configurations for rate limit penalties."""
     violation_key = f"rl:violations:{limits_key.split(':')[-1]}"
@@ -58,9 +58,10 @@ async def _handle_penalty_application(
     violations = await client.incr(violation_key)
     await client.expire(violation_key, window * 2)
 
-    if violations >= 10:
+    if violations >= penalty_threshold:
         await client.setex(penalty_key, penalty_cooldown, "1")
-        logger.warning("Applied IP penalty executing in Redis", key=penalty_key)
+        if violations == penalty_threshold:
+            logger.warning("Applied IP penalty executing in Redis", key=penalty_key)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -145,6 +146,7 @@ class RedisCache:
         penalty_key: str,
         burst: int,
         penalty_cooldown: int,
+        penalty_threshold: int = 10,
     ) -> tuple[bool, int]:
         """Atomically evaluates sliding limits executing single-instance LUA scripts."""
         client = await cls.get_client()
@@ -169,7 +171,7 @@ class RedisCache:
 
             if violated == 1:
                 await _handle_penalty_application(
-                    client, limits_key, penalty_key, window, penalty_cooldown
+                    client, limits_key, penalty_key, window, penalty_cooldown, penalty_threshold
                 )
                 return True, count
 

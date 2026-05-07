@@ -25,17 +25,29 @@ class CircuitState(str, Enum):
 class CircuitBreaker:
     """Per-resource circuit breaker tracking failure/success windows."""
 
+    # Config cached at first use — eliminates 4x ConfigManager.get() per request
+    _enabled: bool = None  # type: ignore
+    _failure_threshold: int = 0
+    _success_threshold: int = 0
+    _timeout: int = 0
+
     # ─────────────────────────────────────────────────────────────────────────────
     # Internal Helpers
     # ─────────────────────────────────────────────────────────────────────────────
 
     @classmethod
-    def _get_circuit(cls, key: str) -> dict:
-        return SecurityStorage.get_circuit_cache(key)
+    def _ensure_config(cls):
+        """Resolve circuit breaker config once, cache forever."""
+        if cls._enabled is None:
+            cb = ConfigManager.get().circuit_breaker
+            cls._enabled = cb.enabled
+            cls._failure_threshold = cb.failure_threshold
+            cls._success_threshold = cb.success_threshold
+            cls._timeout = cb.timeout
 
     @classmethod
-    def _is_enabled(cls) -> bool:
-        return ConfigManager.get().circuit_breaker.enabled
+    def _get_circuit(cls, key: str) -> dict:
+        return SecurityStorage.get_circuit_cache(key)
 
     @classmethod
     def _persist_state(cls, key: str, circuit: dict):
@@ -58,10 +70,10 @@ class CircuitBreaker:
     @classmethod
     def is_open(cls, key: str) -> bool:
         """Determines if the circuit is currently rejecting traffic."""
-        if not cls._is_enabled():
+        cls._ensure_config()
+        if not cls._enabled:
             return False
 
-        config = ConfigManager.get().circuit_breaker
         circuit = cls._get_circuit(key)
 
         # Fast path
@@ -70,7 +82,7 @@ class CircuitBreaker:
 
         # If Open, check if timeout elapsed to attempt Half-Open
         tripped_at = circuit["tripped_at"]
-        if tripped_at and (time.time() - tripped_at) >= config.timeout:
+        if tripped_at and (time.time() - tripped_at) >= cls._timeout:
             circuit["state"] = CircuitState.HALF_OPEN.value
             circuit["successes"] = 0
             logger.info("Circuit half-opened", key=key)
@@ -82,17 +94,17 @@ class CircuitBreaker:
     @classmethod
     def record_success(cls, key: str):
         """Acknowledges a successful request, contributing to healing."""
-        if not cls._is_enabled():
+        cls._ensure_config()
+        if not cls._enabled:
             return
 
-        config = ConfigManager.get().circuit_breaker
         circuit = cls._get_circuit(key)
         state_changed = False
 
         # Heal from HALF_OPEN
         if circuit["state"] == CircuitState.HALF_OPEN.value:
             circuit["successes"] += 1
-            if circuit["successes"] >= config.success_threshold:
+            if circuit["successes"] >= cls._success_threshold:
                 circuit["state"] = CircuitState.CLOSED.value
                 circuit["failures"] = 0
                 state_changed = True
@@ -110,16 +122,16 @@ class CircuitBreaker:
     @classmethod
     def record_failure(cls, key: str):
         """Acknowledges a failed request, moving closer to an OPEN trip."""
-        if not cls._is_enabled():
+        cls._ensure_config()
+        if not cls._enabled:
             return
 
-        config = ConfigManager.get().circuit_breaker
         circuit = cls._get_circuit(key)
         circuit["failures"] += 1
         circuit["last_failure_time"] = time.time()
 
         # Check Trip condition
-        should_trip = circuit["failures"] >= config.failure_threshold
+        should_trip = circuit["failures"] >= cls._failure_threshold
         is_closed = circuit["state"] != CircuitState.OPEN.value
 
         if should_trip and is_closed:
