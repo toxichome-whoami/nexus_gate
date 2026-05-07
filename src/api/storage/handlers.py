@@ -43,18 +43,38 @@ logger = structlog.get_logger()
 UPLOAD_BUFFER_SIZE = 65536
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Module-level feature flags (cached for performance)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_FEDERATION_ENABLED: bool = False
+_FEDERATION_SERVERS: tuple = ()
+_STORAGE_CONFIGS: dict = {}
+_USAGE_CACHE_TTL: int = 30
+
+
+def _refresh_feature_flags():
+    global _FEDERATION_ENABLED, _FEDERATION_SERVERS, _STORAGE_CONFIGS, _USAGE_CACHE_TTL
+    config = ConfigManager.get()
+    _FEDERATION_ENABLED = bool(config.features.federation and config.federation.enabled)
+    _FEDERATION_SERVERS = (
+        tuple(config.federation.server.keys()) if _FEDERATION_ENABLED else ()
+    )
+    _STORAGE_CONFIGS = config.storage
+    # Note: _USAGE_CACHE_TTL could be moved to config.performance if desired
+    _USAGE_CACHE_TTL = 30
+
+
+_refresh_feature_flags()
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Core Utility Functions
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def _is_federated(alias: str) -> bool:
-    config = ConfigManager.get()
-    if not config.features.federation or not config.federation.enabled:
+    if not _FEDERATION_ENABLED:
         return False
-    return any(
-        alias.startswith(f"{srv_alias}_")
-        for srv_alias in config.federation.server.keys()
-    )
+    return any(alias.startswith(f"{srv}_") for srv in _FEDERATION_SERVERS)
 
 
 def _get_storage_path(alias: str, rel_path: Optional[str], auth: AuthContext) -> str:
@@ -66,7 +86,7 @@ def _get_storage_path(alias: str, rel_path: Optional[str], auth: AuthContext) ->
             403,
         )
 
-    storage_cfg = ConfigManager.get().storage.get(alias)
+    storage_cfg = _STORAGE_CONFIGS.get(alias)
     if not storage_cfg:
         raise NexusGateException(
             ErrorCodes.FS_NOT_FOUND, f"Storage '{alias}' not found", 404
@@ -84,8 +104,7 @@ def _get_storage_path(alias: str, rel_path: Optional[str], auth: AuthContext) ->
 
 
 def _build_scanner(alias: str) -> UploadScanner:
-    config = ConfigManager.get()
-    storage_cfg = config.storage.get(alias)
+    storage_cfg = _STORAGE_CONFIGS.get(alias)
     max_file_size = 0
     allowed_ext, blocked_ext = [], []
 
@@ -372,7 +391,7 @@ async def _action_initiate(
 
     upload_id = f"upl_{uuid7().hex}"
 
-    storage_cfg = ConfigManager.get().storage.get(alias)
+    storage_cfg = _STORAGE_CONFIGS.get(alias)
     if not storage_cfg:
         raise NexusGateException(
             ErrorCodes.FS_NOT_FOUND, f"Storage alias not found: {alias}", 404
@@ -578,7 +597,7 @@ async def list_storages(
                 }
             )
 
-    if config.features.federation and config.federation.enabled:
+    if _FEDERATION_ENABLED:
         tasks = [
             _fetch_remote_storages(alias, server_state, storages, auth)
             for alias, server_state in FederationState().servers.items()

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import structlog
 
+from api.database.handlers import _get_cached_columns, _get_cached_tables
 from api.database.query_parser import validate_query
 from api.mcp.session_auth import get_mcp_auth
 from api.mcp.tools.base import EngineResolver, ResultFormatter
@@ -66,14 +67,14 @@ async def _list_tables(database: str) -> list[TextContent]:
         ]
 
     engine = await EngineResolver.require_engine(database)
-    tables = await engine.list_tables()
+    tables = await _get_cached_tables(database, engine)
 
     if not tables:
         return [TextContent(type="text", text=f"No tables in '{database}'.")]
 
     lines = []
     for table in tables:
-        columns = await engine.describe_table(table.name)
+        columns = await _get_cached_columns(database, table.name, engine)
         col_summary = ", ".join(
             ResultFormatter.format_column_inline(c) for c in columns
         )
@@ -94,7 +95,7 @@ async def _describe_table(database: str, table: str) -> list[TextContent]:
         ]
 
     engine = await EngineResolver.require_engine(database)
-    columns = await engine.describe_table(table)
+    columns = await _get_cached_columns(database, table, engine)
 
     if not columns:
         return [TextContent(type="text", text=f"Table '{table}' not found.")]

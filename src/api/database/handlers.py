@@ -38,15 +38,25 @@ _FEDERATION_ENABLED: bool = False
 _FEDERATION_SERVERS: tuple = ()
 _WEBHOOK_ENABLED: bool = False
 _QUERY_CACHE_ENABLED: bool = False
+_QUERY_RESULTS_TTL: int = 5
 
 
 def _refresh_feature_flags():
-    global _FEDERATION_ENABLED, _FEDERATION_SERVERS, _WEBHOOK_ENABLED, _QUERY_CACHE_ENABLED
+    global \
+        _FEDERATION_ENABLED, \
+        _FEDERATION_SERVERS, \
+        _WEBHOOK_ENABLED, \
+        _QUERY_CACHE_ENABLED, \
+        _QUERY_RESULTS_TTL
     config = ConfigManager.get()
     _FEDERATION_ENABLED = bool(config.features.federation and config.federation.enabled)
-    _FEDERATION_SERVERS = tuple(config.federation.server.keys()) if _FEDERATION_ENABLED else ()
+    _FEDERATION_SERVERS = (
+        tuple(config.federation.server.keys()) if _FEDERATION_ENABLED else ()
+    )
     _WEBHOOK_ENABLED = bool(config.features.webhook and config.webhooks.enabled)
     _QUERY_CACHE_ENABLED = bool(config.cache.enabled and config.cache.query_cache)
+    _QUERY_RESULTS_TTL = config.cache.query_results_ttl
+
 
 _refresh_feature_flags()
 
@@ -217,6 +227,37 @@ def _construct_select_rest_payload(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Introspection Caching (O(N) Elimination)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def _get_cached_tables(db_name: str, engine) -> list:
+    """Fetches table names with O(1) cache lookup, bypassing O(N) introspection."""
+    cache_key = f"schema:tables:{db_name}"
+    cached = await CacheManager.get(cache_key)
+    if cached is not None:
+        return cached
+
+    tables = await engine.list_tables()
+    # Cache for 60 seconds (schemas change rarely during a session)
+    await CacheManager.set(cache_key, tables, ttl=60)
+    return tables
+
+
+async def _get_cached_columns(db_name: str, table_name: str, engine) -> list:
+    """Fetches column metadata with O(1) cache lookup."""
+    cache_key = f"schema:cols:{db_name}:{table_name}"
+    cached = await CacheManager.get(cache_key)
+    if cached is not None:
+        return cached
+
+    columns = await engine.describe_table(table_name)
+    # Cache for 300 seconds (column metadata is very stable)
+    await CacheManager.set(cache_key, columns, ttl=300)
+    return columns
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Class-Based Execution Architecture
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -284,9 +325,12 @@ class QueryExecutionPipeline:
         is_read = operations in ("select", "show", "describe")
         cache_key = None
         if is_read and _QUERY_CACHE_ENABLED:
-            cache_key = "qc:" + hashlib.md5(
-                f"{db_name}|{safe_sql}|{json.dumps(params, sort_keys=True, default=str)}".encode()
-            ).hexdigest()
+            cache_key = (
+                "qc:"
+                + hashlib.md5(
+                    f"{db_name}|{safe_sql}|{json.dumps(params, sort_keys=True, default=str)}".encode()
+                ).hexdigest()
+            )
             cached = await CacheManager.get(cache_key)
             if cached is not None:
                 return cached
@@ -296,11 +340,7 @@ class QueryExecutionPipeline:
         result = await engine.execute(transpiled_sql, params)
 
         if _WEBHOOK_ENABLED:
-            webhook_action = (
-                "SELECT"
-                if is_read
-                else operations.upper()
-            )
+            webhook_action = "SELECT" if is_read else operations.upper()
             _emit_db_webhook_event(
                 request,
                 auth,
@@ -415,11 +455,11 @@ async def list_tables(
         )
 
     engine, _ = await get_db_engine(db_name, auth)
-    tables = await engine.list_tables()
+    tables = await _get_cached_tables(db_name, engine)
     formatted_tables = []
 
     for table in tables:
-        columns = await engine.describe_table(table.name)
+        columns = await _get_cached_columns(db_name, table.name, engine)
         formatted_tables.append(
             {
                 "name": table.name,
@@ -436,7 +476,9 @@ async def list_tables(
             }
         )
 
-    return cacheable_response(request, {"database": db_name, "tables": formatted_tables})
+    return cacheable_response(
+        request, {"database": db_name, "tables": formatted_tables}
+    )
 
 
 @router.post("/{db_name}/query")
@@ -487,7 +529,7 @@ async def get_rows(
         data = await QueryExecutionPipeline.run_query(
             engine, db_cfg, auth, request, db_name, raw_sql, sql_params
         )
-        return cacheable_response(request, data["rows"], max_age=5)
+        return cacheable_response(request, data["rows"], max_age=_QUERY_RESULTS_TTL)
     except Exception as select_error:
         raise NexusGateException(ErrorCodes.DB_QUERY_FAILED, str(select_error), 500)
 

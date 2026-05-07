@@ -76,6 +76,8 @@ class CacheConfig(BaseModel):
     fs_cache: bool = True
     idempotency_ttl: int = 86400  # Seconds before idempotency keys expire (24h)
     response_cache_ttl: int = 30  # Default max-age for cacheable GET responses
+    query_results_ttl: int = 5    # Max-age for SQL row data results
+    upload_session_ttl: int = 3600 # Seconds before chunked upload session expires (1h)
 
 
 class PerformanceConfig(BaseModel):

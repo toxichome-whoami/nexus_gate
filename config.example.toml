@@ -1,206 +1,141 @@
-# ─────────────────────────────────────────────
-# NexusGate — Example Configuration File
-# Copy to config.toml and edit as needed.
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# NexusGate - Industrial-Grade Unified API Gateway
+# Configuration Example
+# ─────────────────────────────────────────────────────────────────────────────
 
-# ─── Server ───────────────────────────────────
+# ─── Server Settings ──────────────────────────────────
+# Tuning the underlying network and execution bindings.
 [server]
-host = "0.0.0.0"
-port = 4500
-workers = 0                     # 0 = auto-detect (CPUs * 2 + 1)
-max_connections = 10000
-request_timeout = 30            # Seconds
-body_limit = "10 MB"
-tls_cert = ""                   # Path to TLS cert file. Leave blank to disable TLS.
-tls_key = ""                    # Path to TLS private key file.
-allowed_ips = []                # IPs exempt from rate limiting (e.g. ["127.0.0.1"])
-trusted_proxies = ["127.0.0.1"]
-cors_origins = ["*"]            # CORS origins, use ["*"] for all
-shutdown_timeout = 30
+host = "0.0.0.0"                 # Bind to all interfaces
+port = 4500                      # Public port
+workers = 0                      # 0 = auto-detect based on CPU cores (CPUs * 2 + 1)
+max_connections = 10000          # Maximum concurrent TCP connections
+request_timeout = 30             # Timeout per request in seconds
+body_limit = "10mb"              # Maximum request body size (e.g., "10mb", "1gb")
+tls_cert = ""                    # Path to TLS certificate (leave blank for HTTP)
+tls_key = ""                     # Path to TLS private key
+allowed_ips = ["127.0.0.1"]      # IPs exempt from rate limiting
+trusted_proxies = ["127.0.0.1"]  # Proxies to trust for X-Forwarded-For headers
+cors_origins = ["*"]             # Allowed CORS origins
+shutdown_timeout = 30            # Seconds to wait for active requests during shutdown
 
-# ─── Feature Flags ────────────────────────────
+# ─── Modular Features ─────────────────────────────────
+# Toggle major subsystems to minimize RAM and CPU footprint.
 [features]
-database = true
-storage = true
-webhook = true
-federation = false
-metrics = true
-playground = false # Enable /api/docs Swagger UI
-mcp = false        # Enable MCP (Model Context Protocol) server
+database = true                  # Enable SQL Database Gateway
+storage = true                   # Enable Filesystem/Storage Gateway
+webhook = true                   # Enable Outbound Webhook Dispatcher
+federation = false               # Enable Multi-Node Federation
+metrics = true                   # Enable Prometheus/OpenMetrics endpoint
+playground = true                # Enable /api/docs Swagger UI
+mcp = true                       # Enable Model Context Protocol server
 
-# ─── MCP ──────────────────────────────────────
+# ─── Model Context Protocol (MCP) ─────────────────────
 [mcp]
 server_name = "nexusgate"
-server_version = "1.0.2"
+server_version = "1.0.0"
 
-# ─── Logging ──────────────────────────────────
+# ─── Logging ──────────────────────────────────────────
 [logging]
-level = "INFO"            # TRACE | DEBUG | INFO | WARN | ERROR
-format = "json"           # json | pretty
-directory = "./logs"
-file_prefix = "nexusgate"
-max_file_size = "50 MB"
-max_files = 5
-stdout = true
+level = "INFO"                   # TRACE | DEBUG | INFO | WARNING | ERROR
+format = "json"                  # json (production) | pretty (development)
+directory = "./logs"             # Where to store log files
+file_prefix = "nexusgate"        # Prefix for log filenames
+max_file_size = "50mb"           # Max size per log file before rotation
+max_files = 5                    # Number of rotated logs to keep
+stdout = true                    # Stream logs to console
 
-# ─── Rate Limiting ────────────────────────────
+# ─── Rate Limiting ────────────────────────────────────
+# Hardened locks preventing DOS and brute-force attacks.
 [rate_limit]
-enabled = true
-backend = "memory"     # memory | redis
-redis_url = ""         # Required if backend = "redis"
-window = 60            # Seconds per window
-max_requests = 100     # Max requests per window per key
-burst = 20             # Extra burst allowance
-penalty_cooldown = 300 # Seconds to ban after 10 consecutive violations
+enabled = false                  # Master toggle for rate limiting
+backend = "memory"               # memory | redis | sqlite
+redis_url = ""                   # Required if backend = "redis" (e.g., "redis://localhost:6379/0")
+window = 60                      # Rolling window size in seconds
+max_requests = 100               # Max requests allowed per window
+burst = 20                       # Extra allowance for short bursts
+penalty_threshold = 10           # Consecutive violations before temporary IP ban
+penalty_cooldown = 300           # Duration of IP ban in seconds
 
-# ─── Caching ──────────────────────────────────
+# ─── Caching ──────────────────────────────────────────
+# Mitigation for backend latency via internal response caching.
 [cache]
 enabled = true
-backend = "memory"   # memory | redis
-redis_url = ""
-max_memory = "100 MB"
-default_ttl = 60     # Seconds
-query_cache = true
-fs_cache = true
+backend = "memory"               # memory | redis | sqlite
+redis_url = ""                   # Required if backend = "redis"
+max_memory = "100mb"             # Memory limit for internal cache (approximate)
+default_ttl = 60                 # Default expiration for generic items (seconds)
+query_cache = true               # Cache SQL query metadata/AST
+fs_cache = true                  # Cache filesystem directory listings
+idempotency_ttl = 86400          # Duration to remember idempotent requests (24h)
+response_cache_ttl = 30          # Default Max-Age for cacheable GET responses
 
-# ─── Webhook Global Settings ──────────────────
-[webhooks]
-enabled = true
-timeout = 5                             # HTTP delivery timeout in seconds
-max_retries = 3
-retry_delay = 2                         # Base delay seconds (exponential: delay^attempt)
-queue_size = 10000
-secret_header = "X-NexusGate-Signature"
+# ─── Performance Tuning ───────────────────────────────
+# Low-level knobs for internal LRU caches and hot-path logic.
+[performance]
+query_cache_size = 2048          # Slots for parsed SQL query ASTs
+transpiler_cache_size = 4096     # Slots for SQL dialect transpilation results
+rate_limit_cache_size = 256      # Slots for rate-limit metadata lookups
 
-# ─── Circuit Breaker ──────────────────────────
+# ─── Circuit Breaker ──────────────────────────────────
+# Prevents cascading failures by isolating unresponsive backends.
 [circuit_breaker]
 enabled = true
-failure_threshold = 5 # Failures before tripping OPEN
-success_threshold = 3 # Successes in HALF_OPEN before CLOSED
-timeout = 30          # Seconds before attempting HALF_OPEN
+failure_threshold = 5            # Failures before tripping "OPEN" (rejecting all)
+success_threshold = 3            # Successes required in "HALF-OPEN" to recover
+timeout = 30                     # Seconds to wait before testing recovery
 
-# ─── API Keys ─────────────────────────────────
-# auto-generated on first run. The key name is the identifier,
-# and the secret must be at least 32 characters long.
-# Auth format: Authorization: Bearer base64(<name>:<secret>)
-
+# ─── API Keys & Access Control ────────────────────────
+# Static administrative keys. Dynamic keys are managed via /api/admin.
 [api_key.admin]
-secret = "CHANGE_ME_to_a_random_64_char_secret_string_NOW"
-mode = "readwrite"                                         # readwrite | readonly | writeonly
-db_scope = ["*"]                                           # ["*"] or specific names e.g. ["main_db", "analytics"]
-fs_scope = ["*"]
-rate_limit_override = 0                                    # 0 = use global limit
+secret = "CHANGE_THIS_TO_A_SECURE_KEY_AT_LEAST_32_CHARS"
+mode = "readwrite"               # readwrite | readonly | writeonly
+db_scope = ["*"]                 # ["*"] for all, or ["db1", "db2"]
+fs_scope = ["*"]                 # ["*"] for all, or ["vol1", "vol2"]
+rate_limit_override = 0          # 0 = use global limit, >0 = specific limit
+full_admin = true                # Bypass all scope checks
 
-[api_key.readonly_user]
-secret = "CHANGE_ME_to_another_random_64_char_secret_string"
-mode = "readonly"
-db_scope = ["*"]
-fs_scope = ["*"]
-rate_limit_override = 200
-
-# ─── Databases ────────────────────────────────
-# Each key under [database.*] defines a named database alias.
-
+# ─── Database Backends ────────────────────────────────
+# Configure your SQL targets (PostgreSQL, MySQL, SQLite, etc.)
 [database.main_db]
-engine = "sqlite"                               # sqlite | postgres | mysql | mariadb | mssql
-url = "sqlite:///./data/main.db"
-mode = "readwrite"
-pool_min = 2
-pool_max = 10
-connection_timeout = 5
-idle_timeout = 300
-max_lifetime = 1800
+engine = "postgres"              # postgres | mysql | sqlite | mariadb | mssql
+url = "postgresql://user:pass@localhost:5432/dbname"
+mode = "readwrite"               # readwrite | readonly
+pool_min = 5                     # Minimum idle connections
+pool_max = 20                    # Maximum concurrent connections
+connection_timeout = 30          # Seconds to wait for a connection
+idle_timeout = 600               # Seconds to keep an idle connection alive
+max_lifetime = 3600              # Maximum age of a connection
 query_blacklist = ["DROP", "TRUNCATE", "ALTER"]
-dangerous_operations = false
+dangerous_operations = false     # Allow/Disallow raw SQL outside of NexusGate dialect
 
-[database.analytics]
-engine = "postgres"
-url = "postgresql://user:password@localhost:5432/analytics"
-mode = "readonly"
-pool_min = 1
-pool_max = 20
-dangerous_operations = false
-
-# ─── Storage Volumes ──────────────────────────
-# Each key under [storage.*] defines a named virtual filesystem root.
-
+# ─── Storage Volumes ──────────────────────────────────
+# Mount local or network directories as virtual storage aliases.
 [storage.uploads]
-path = "./storage/uploads"
-mode = "readwrite"
-limit = "10 GB"
-chunk_size = "10 MB"
-max_file_size = "500 MB"
-allowed_extensions = []                                      # [] = all allowed
+path = "storage/uploads"         # Physical path on the host machine
+mode = "readwrite"               # readwrite | readonly
+limit = "10gb"                   # Total capacity limit
+chunk_size = "10mb"              # Preferred size for multipart uploads
+max_file_size = "800mb"          # Maximum size per individual file
+allowed_extensions = []          # Empty = all allowed
 blocked_extensions = [".exe", ".bat", ".sh", ".cmd", ".ps1"]
 
-[storage.assets]
-path = "./storage/assets"
-mode = "readonly"
-limit = "5 GB"
-chunk_size = "10 MB"
-max_file_size = "100 MB"
-
-# ─── Webhooks ─────────────────────────────────
-# Rule format: module.operation@alias:target
-# module: db | fs
-# operation: read | write | delete | any | *
-# alias: database or storage alias name, or *
-# target: table name, file path, or *
-#
-# AUTHENTICATION:
-#   The client MUST send the webhook secret as Base64-encoded in the header:
-#     X-NexusGate-Webhook-Token: base64(secret)
-#   The gateway decodes it and verifies against the stored secret.
-#
-# DELIVERY:
-#   When NexusGate fires a webhook to your receiver URL, it sends:
-#     X-NexusGate-Signature: sha256=<HMAC-SHA256 of payload>
-#     X-NexusGate-Timestamp: <unix timestamp>
-#   Your receiver verifies the HMAC using the same secret.
-
-[webhook.on_user_insert]
-url = "https://example.com/hooks/nexusgate"
-secret = "your-webhook-signing-secret-at-least-32-chars"
-rule = "db.write@main_db:users"
+# ─── Webhooks (Optional) ──────────────────────────────
+# Trigger external services on database or filesystem changes.
+[webhook.log_sink]
+url = "https://your-webhook-endpoint.com/receive"
+secret = "YOUR_WEBHOOK_SECRET"
+rule = "db.any@main_db:*"      # Format: module.operation@alias:target
 enabled = true
 
-[webhook.on_any_upload]
-url = "https://example.com/hooks/fs-events"
-secret = "another-secret-for-fs-webhooks-32-chars-min"
-rule = "fs.write@uploads:*"
-enabled = true
-
-# ─── Federation ───────────────────────────────
-# Connect multiple NexusGate instances into a mesh.
-# Federation uses its own isolated secrets — NOT your API keys.
-
+# ─── Federation (Optional) ────────────────────────────
+# Connect multiple NexusGate nodes into a unified cluster.
 [federation]
-enabled = false
-sync_interval = 30 # Seconds between health syncs
+enabled = true
+sync_interval = 60             # Seconds between health heartbeats
 
-# ─── Incoming Federation Keys ─────────────────
-# Each block allows ONE remote node to connect to this server.
-# Each key has its own mode + scope. To allow more servers, add more blocks.
-
-[federation.incoming.us_east_node]
-secret = "CHANGE_ME_unique_federation_secret_at_least_32_chars"
-mode = "readwrite"                                              # readonly | readwrite
-db_scope = ["*"]                                                # ["*"] = all databases, or ["main_db", "analytics"]
-fs_scope = ["*"]                                                # ["*"] = all storage, or ["uploads"]
-description = "US East production node"
-
-# [federation.incoming.eu_mirror]
-# secret = "CHANGE_ME_another_unique_secret_for_this_node_only"
-# mode = "readonly"
-# db_scope = ["analytics"]
-# fs_scope = []
-# description = "EU analytics readonly mirror"
-
-# ─── Outgoing Server Connections ──────────────
-# Connect this server to a remote NexusGate instance.
-
-[federation.server.edge_us]
-url = "https://nexusgate-us.example.com"
-secret = "MUST_MATCH_the_remote_servers_incoming_key_secret"
-node_id = "us_east_node"                                     # Your identity on the remote server
-trust_mode = "verify"                                        # verify | trust (trust skips TLS cert check)
+# [federation.server.edge_node]
+url = "https://other-nexusgate-node.com/"
+secret = "FEDERATION_SECRET_KEY"
+node_id = "local_identity"
+trust_mode = "verify"          # verify (strict SSL) | trust (skip cert check)
