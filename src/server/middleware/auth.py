@@ -113,7 +113,8 @@ def _get_dynamic_key_context(key_name: str, secret: str) -> AuthContext | None:
     if not db_key:
         return None
 
-    provided_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+    salt = db_key.get("salt", "")
+    provided_hash = hashlib.pbkdf2_hmac("sha256", secret.encode("utf-8"), salt.encode("utf-8"), 100000).hex()
     if not hmac.compare_digest(
         db_key["secret_hash"].encode("utf-8"), provided_hash.encode("utf-8")
     ):

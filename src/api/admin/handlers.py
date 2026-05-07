@@ -36,13 +36,15 @@ def _require_fields(mapping: dict, *fields: str) -> None:
             )
 
 
-def _generate_secure_secret() -> tuple[str, str]:
-    """Generates a cryptographically secure random secret and its SHA-256 hash."""
+def _generate_secure_secret() -> tuple[str, str, str]:
+    """Generates a cryptographically secure random secret and its PBKDF2 hash."""
+    import os
     alphabet = string.ascii_letters + string.digits
     length = secrets.choice(range(32, 65))
     raw_secret = "".join(secrets.choice(alphabet) for _ in range(length))
-    secret_hash = hashlib.sha256(raw_secret.encode("utf-8")).hexdigest()
-    return raw_secret, secret_hash
+    salt = os.urandom(16).hex()
+    secret_hash = hashlib.pbkdf2_hmac("sha256", raw_secret.encode("utf-8"), salt.encode("utf-8"), 100000).hex()
+    return raw_secret, salt, secret_hash
 
 
 def _extract_remote_databases(alias: str, db_list: dict, local_dbs: dict) -> None:
@@ -146,11 +148,12 @@ async def create_api_key(
             ErrorCodes.INPUT_VALUE_INVALID, "Key name already exists", 400
         )
 
-    raw_secret, secret_hash = _generate_secure_secret()
+    raw_secret, salt, secret_hash = _generate_secure_secret()
 
     await SecurityStorage.add_api_key(
         name=name,
         secret_hash=secret_hash,
+        salt=salt,
         mode=body.get("mode", "readwrite"),
         db_scope=body.get("db_scope", ["*"]),
         fs_scope=body.get("fs_scope", ["*"]),

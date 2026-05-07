@@ -153,11 +153,11 @@ def _attach_routers(app: FastAPI):
     api_v1.include_router(federation.router, prefix="/fed")
     api_v1.include_router(admin_router, prefix="/admin")
 
-    # MCP Server (zero-cost when features.mcp is disabled)
     if config.features.mcp:
         from api.mcp import router as mcp_router
 
         api_v1.include_router(mcp_router, prefix="/mcp")
+        app.state.mcp_initialized = True
 
     app.include_router(api_v1)
 

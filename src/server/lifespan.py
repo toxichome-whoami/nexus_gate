@@ -89,6 +89,9 @@ async def lifespan(app: FastAPI):
     # 3. Teardown Subsystems
     logger.info("Initiating NexusGate shutdown sequence")
     await _stop_background_daemons(active_daemons)
+    if hasattr(app.state, "mcp_initialized"):
+        from api.mcp.server import MCPServerManager
+        MCPServerManager.shutdown()
     await DatabasePoolManager.shutdown()
 
     # 4. Teardown HTTP Clients

@@ -61,6 +61,7 @@ class SecurityStorage:
             CREATE TABLE IF NOT EXISTS api_keys (
                 name TEXT PRIMARY KEY,
                 secret_hash TEXT NOT NULL,
+                salt TEXT NOT NULL DEFAULT '',
                 mode TEXT NOT NULL,
                 db_scope TEXT NOT NULL,
                 fs_scope TEXT NOT NULL,
@@ -68,6 +69,12 @@ class SecurityStorage:
                 created_at REAL NOT NULL
             )
         """)
+        
+        # Migration: add salt column if it doesn't exist
+        try:
+            await db.execute("ALTER TABLE api_keys ADD COLUMN salt TEXT NOT NULL DEFAULT ''")
+        except aiosqlite.OperationalError:
+            pass  # Column already exists
         await db.execute("""
             CREATE TABLE IF NOT EXISTS bans (
                 type TEXT NOT NULL,
@@ -124,21 +131,22 @@ class SecurityStorage:
     @classmethod
     async def _load_api_keys(cls, db: aiosqlite.Connection):
         cls._api_keys_cache.clear()
-        query = "SELECT name, secret_hash, mode, db_scope, fs_scope, rate_limit_override FROM api_keys"
+        query = "SELECT name, secret_hash, salt, mode, db_scope, fs_scope, rate_limit_override FROM api_keys"
         async with db.execute(query) as cursor:
             async for row in cursor:
                 try:
-                    db_scope = json.loads(row[3])
-                    fs_scope = json.loads(row[4])
+                    db_scope = json.loads(row[4])
+                    fs_scope = json.loads(row[5])
                 except Exception:
                     db_scope, fs_scope = ["*"], ["*"]
 
                 cls._api_keys_cache[row[0]] = {
                     "secret_hash": row[1],
-                    "mode": row[2],
+                    "salt": row[2],
+                    "mode": row[3],
                     "db_scope": db_scope,
                     "fs_scope": fs_scope,
-                    "rate_limit_override": row[5],
+                    "rate_limit_override": row[6],
                 }
 
     @classmethod
@@ -211,6 +219,7 @@ class SecurityStorage:
         cls,
         name: str,
         secret_hash: str,
+        salt: str,
         mode: str,
         db_scope: list,
         fs_scope: list,
@@ -219,12 +228,13 @@ class SecurityStorage:
         async with aiosqlite.connect(DB_PATH) as db:
             query = """
                 INSERT OR REPLACE INTO api_keys
-                (name, secret_hash, mode, db_scope, fs_scope, rate_limit_override, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (name, secret_hash, salt, mode, db_scope, fs_scope, rate_limit_override, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """
             params = (
                 name,
                 secret_hash,
+                salt,
                 mode,
                 json.dumps(db_scope),
                 json.dumps(fs_scope),
@@ -236,6 +246,7 @@ class SecurityStorage:
 
         cls._api_keys_cache[name] = {
             "secret_hash": secret_hash,
+            "salt": salt,
             "mode": mode,
             "db_scope": db_scope,
             "fs_scope": fs_scope,

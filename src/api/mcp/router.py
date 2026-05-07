@@ -126,12 +126,7 @@ async def handle_sse_connection(request: Request) -> Response:
     """Opens a persistent SSE stream for an MCP client session."""
     try:
         _authenticate_from_request(request)
-    except _AuthenticationError as auth_err:
-        return auth_err.response
-
-    server = MCPServerManager.get()
-
-    try:
+        server = MCPServerManager.get()
         async with _transport.connect_sse(
             request.scope, request.receive, request._send
         ) as (read_stream, write_stream):
@@ -140,6 +135,8 @@ async def handle_sse_connection(request: Request) -> Response:
                 write_stream,
                 server.create_initialization_options(),
             )
+    except _AuthenticationError as auth_err:
+        return auth_err.response
     finally:
         clear_mcp_auth()
 
@@ -151,13 +148,11 @@ async def handle_mcp_message(request: Request) -> Response:
     """Routes a JSON-RPC message to the matching tool or resource handler."""
     try:
         _authenticate_from_request(request)
-    except _AuthenticationError as auth_err:
-        return auth_err.response
-
-    try:
         await _transport.handle_post_message(
             request.scope, request.receive, request._send
         )
+    except _AuthenticationError as auth_err:
+        return auth_err.response
     finally:
         clear_mcp_auth()
 

@@ -7,12 +7,12 @@ All paths are resolved and strictly confined within the storage alias root.
 
 from __future__ import annotations
 
+import asyncio
 import os
 
 import structlog
 
 from api.mcp.session_auth import get_mcp_auth
-from api.mcp.tools.base import MAX_DIRECTORY_ENTRIES, MAX_FILE_READ_BYTES
 from api.mcp.tools.registry import mcp_tool_registry
 from config.provider import GlobalConfigProvider
 from mcp.types import TextContent
@@ -24,32 +24,62 @@ logger = structlog.get_logger()
 
 
 def _resolve_safe_path(storage_root: str, user_path: str) -> str | None:
-    """
-    Resolves the user-supplied path against the storage root and verifies
-    the result is still within the root. Returns None if the resolved path
-    escapes the allowed directory (path traversal attempt).
-    """
-    # Normalize the root to an absolute, symlink-resolved canonical form
     canonical_root = os.path.realpath(storage_root)
-
-    # Build and resolve the target path
     joined = os.path.join(canonical_root, user_path.lstrip("/"))
     canonical_target = os.path.realpath(joined)
 
-    # Verify containment: the resolved target must start with the root
     if (
         not canonical_target.startswith(canonical_root + os.sep)
         and canonical_target != canonical_root
     ):
         return None
-
     return canonical_target
 
 
+def _scan_directory(target_dir: str, max_entries: int) -> list[tuple[str, bool]]:
+    """Sync helper — runs in a thread. Returns [(name, is_dir), ...]."""
+    try:
+        raw = os.listdir(target_dir)
+    except PermissionError:
+        return []
+
+    result = []
+    for name in raw[:max_entries]:
+        full = os.path.join(target_dir, name)
+        try:
+            is_dir = os.path.isdir(full)
+        except PermissionError:
+            is_dir = False
+        result.append((name, is_dir))
+
+    has_more = len(raw) > max_entries
+    if has_more:
+        result.append(("__overflow", len(raw) - max_entries))
+    return result
+
+
+def _read_secure(file_path: str, max_bytes: int, storage_root: str) -> str:
+    """Sync helper — runs in a thread. TOCTOU-safe file read."""
+    fd = os.open(file_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        st = os.fstat(fd)
+        if st.st_size > max_bytes:
+            raise ValueError(f"File too large ({st.st_size:,} bytes). Max: {max_bytes:,}.")
+
+        if hasattr(os, "O_NOFOLLOW") and os.name != "nt":
+            actual_path = os.path.realpath(f"/proc/self/fd/{fd}")
+            canonical_root = os.path.realpath(storage_root)
+            if not actual_path.startswith(canonical_root + os.sep) and actual_path != canonical_root:
+                raise PermissionError("Path traversal detected")
+
+        content_bytes = os.read(fd, max_bytes)
+        return content_bytes.decode("utf-8", errors="replace")
+    finally:
+        os.close(fd)
+
+
 def _check_storage_scope(alias: str) -> bool:
-    """Verifies the authenticated session has access to the requested storage alias."""
     auth = get_mcp_auth()
-    # Empty fs_scope or "*" means unrestricted access to all storages
     if not auth.fs_scope or "*" in auth.fs_scope:
         return True
     return alias in auth.fs_scope
@@ -59,11 +89,10 @@ def _check_storage_scope(alias: str) -> bool:
 
 
 async def _list_storages() -> list[TextContent]:
-    """Lists storage aliases visible to the authenticated session."""
     auth = get_mcp_auth()
-    all_aliases = list(GlobalConfigProvider().get_config().storage.keys())
+    config = GlobalConfigProvider().get_config()
+    all_aliases = list(config.storage.keys())
 
-    # Filter by scope if restrictions exist and it's not a global wildcard
     if auth.fs_scope and "*" not in auth.fs_scope:
         visible = [a for a in all_aliases if a in auth.fs_scope]
     else:
@@ -75,88 +104,74 @@ async def _list_storages() -> list[TextContent]:
 
 async def _list_files(storage: str, path: str = "/") -> list[TextContent]:
     if not _check_storage_scope(storage):
-        return [
-            TextContent(
-                type="text",
-                text=f"Access denied: storage '{storage}' is outside your scope.",
-            )
-        ]
+        return [TextContent(type="text", text="Access denied: the requested resource is not available")]
 
-    storage_config = GlobalConfigProvider().get_config().storage.get(storage)
+    config = GlobalConfigProvider().get_config()
+    storage_config = config.storage.get(storage)
     if not storage_config:
         return [TextContent(type="text", text=f"Storage '{storage}' not found.")]
 
     target_dir = _resolve_safe_path(storage_config.path, path)
     if target_dir is None:
-        return [
-            TextContent(type="text", text="Access denied: path traversal detected.")
-        ]
+        return [TextContent(type="text", text="Access denied: path traversal detected.")]
 
-    if not os.path.isdir(target_dir):
+    is_dir = await asyncio.to_thread(os.path.isdir, target_dir)
+    if not is_dir:
         return [TextContent(type="text", text=f"Path '{path}' is not a directory.")]
 
-    raw_entries = os.listdir(target_dir)
+    max_entries = config.mcp.max_directory_entries
+    entries = await asyncio.to_thread(_scan_directory, target_dir, max_entries)
+
     lines = []
-    for name in raw_entries[:MAX_DIRECTORY_ENTRIES]:
-        full = os.path.join(target_dir, name)
-        file_type = "[DIR]" if os.path.isdir(full) else "[FILE]"
+    has_overflow = False
+    overflow_count = 0
+    for name, is_dir_flag in entries:
+        if name == "__overflow":
+            has_overflow = True
+            overflow_count = is_dir_flag
+            continue
+        file_type = "[DIR]" if is_dir_flag else "[FILE]"
         lines.append(f"  {file_type:<6} {name}")
 
-    overflow = len(raw_entries) - MAX_DIRECTORY_ENTRIES
-    if overflow > 0:
-        lines.append(f"  ... and {overflow} more")
+    if has_overflow:
+        lines.append(f"  ... and {overflow_count} more")
 
-    return [
-        TextContent(
-            type="text", text=f"Contents of '{storage}:{path}':\n" + "\n".join(lines)
-        )
-    ]
+    return [TextContent(type="text", text=f"Contents of '{storage}:{path}':\n" + "\n".join(lines))]
 
 
 async def _read_file(storage: str, path: str) -> list[TextContent]:
     if not _check_storage_scope(storage):
-        return [
-            TextContent(
-                type="text",
-                text=f"Access denied: storage '{storage}' is outside your scope.",
-            )
-        ]
+        return [TextContent(type="text", text="Access denied: the requested resource is not available")]
 
-    storage_config = GlobalConfigProvider().get_config().storage.get(storage)
+    config = GlobalConfigProvider().get_config()
+    storage_config = config.storage.get(storage)
     if not storage_config:
         return [TextContent(type="text", text=f"Storage '{storage}' not found.")]
 
     file_path = _resolve_safe_path(storage_config.path, path)
     if file_path is None:
-        return [
-            TextContent(type="text", text="Access denied: path traversal detected.")
-        ]
+        return [TextContent(type="text", text="Access denied: path traversal detected.")]
 
-    if not os.path.isfile(file_path):
+    is_file = await asyncio.to_thread(os.path.isfile, file_path)
+    if not is_file:
         return [TextContent(type="text", text=f"File '{path}' does not exist.")]
 
-    file_size = os.path.getsize(file_path)
-    if file_size > MAX_FILE_READ_BYTES:
-        return [TextContent(type="text", text=f"File too large ({file_size:,} bytes).")]
-
+    max_bytes = config.mcp.max_file_read_bytes
     try:
-        with open(file_path, "r", encoding="utf-8", errors="replace") as fh:
-            content = fh.read()
+        content = await asyncio.to_thread(_read_secure, file_path, max_bytes, storage_config.path)
         return [TextContent(type="text", text=content)]
+    except ValueError as ve:
+        return [TextContent(type="text", text=str(ve))]
+    except PermissionError:
+        return [TextContent(type="text", text="Access denied: path traversal detected.")]
     except Exception:
-        return [
-            TextContent(
-                type="text", text="Failed to read file due to an internal error."
-            )
-        ]
+        return [TextContent(type="text", text="Failed to read file due to an internal error.")]
 
 
 # -- Registration ----------------------------------------------------------
 
 
 def register_storage_tools() -> None:
-    """Registers storage capabilities into the global tool registry."""
-
     mcp_tool_registry.register(
         name="list_storages",
         description="Lists all file system directory aliases securely mounted behind NexusGate.",

@@ -18,9 +18,6 @@ from mcp.types import TextContent
 # ── Safety Caps ──────────────────────────────────────────────────────────
 # Prevents large payloads from blowing up the model's context window or RAM.
 
-MAX_RESULT_ROWS = 50
-MAX_DIRECTORY_ENTRIES = 100
-MAX_FILE_READ_BYTES = 1_048_576  # 1 MB
 
 
 class EngineResolver:
@@ -71,8 +68,10 @@ class ResultFormatter:
             return TextContent(type="text", text="Query returned 0 rows.")
 
         total_count = len(rows)
-        is_truncated = total_count > MAX_RESULT_ROWS
-        visible_rows = rows[:MAX_RESULT_ROWS]
+        config = GlobalConfigProvider().get_config()
+        max_rows = config.mcp.max_result_rows
+        is_truncated = total_count > max_rows
+        visible_rows = rows[:max_rows]
         columns = result.columns or list(visible_rows[0].keys())
 
         table_body = ResultFormatter._render_table(columns, visible_rows)

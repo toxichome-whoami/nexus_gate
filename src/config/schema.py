@@ -93,6 +93,9 @@ class MCPConfig(BaseModel):
 
     server_name: str = "nexusgate"
     server_version: str = "1.0.2"  # Mirrors src/__init__.py __version__
+    max_result_rows: int = 50
+    max_directory_entries: int = 100
+    max_file_read_bytes: int = 1_048_576
 
 
 # ─────────────────────────────────────────────────────────────────────────────

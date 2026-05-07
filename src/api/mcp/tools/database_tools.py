@@ -62,7 +62,7 @@ async def _list_tables(database: str) -> list[TextContent]:
         return [
             TextContent(
                 type="text",
-                text=f"Access denied: database '{database}' is outside your scope.",
+                text="Access denied: the requested resource is not available",
             )
         ]
 
@@ -90,7 +90,7 @@ async def _describe_table(database: str, table: str) -> list[TextContent]:
         return [
             TextContent(
                 type="text",
-                text=f"Access denied: database '{database}' is outside your scope.",
+                text="Access denied: the requested resource is not available",
             )
         ]
 
@@ -113,7 +113,7 @@ async def _query_database(database: str, sql: str) -> list[TextContent]:
         return [
             TextContent(
                 type="text",
-                text=f"Access denied: database '{database}' is outside your scope.",
+                text="Access denied: the requested resource is not available",
             )
         ]
 
