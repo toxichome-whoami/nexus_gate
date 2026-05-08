@@ -627,9 +627,26 @@ async def list_folder(
                 500,
             )
 
-        entries.sort(key=lambda e: e.name)
-        total = len(entries)
-        page = entries[offset : offset + limit]
+        if recursive:
+            # Depth-first recursive walk: collect all entries from subdirectories
+            all_entries = []
+            stack = list(entries)
+            while stack:
+                entry = stack.pop()
+                all_entries.append(entry)
+                if entry.is_dir(follow_symlinks=False):
+                    try:
+                        sub = list(os.scandir(entry.path))
+                        stack.extend(sub)
+                    except (OSError, PermissionError):
+                        continue
+            all_entries.sort(key=lambda e: e.path)
+            total = len(all_entries)
+            page = all_entries[offset : offset + limit]
+        else:
+            entries.sort(key=lambda e: e.name)
+            total = len(entries)
+            page = entries[offset : offset + limit]
 
         items = [build_file_info_from_entry(e) for e in page]
         return total, items
@@ -667,10 +684,13 @@ async def download_file(
         return await proxy_request(alias, "download", request, False)
     target_path = _get_storage_path(alias, path, auth)
 
-    if os.path.isdir(target_path):
+    is_dir = await asyncio.to_thread(os.path.isdir, target_path)
+    if is_dir:
         return stream_zip_folder(target_path, os.path.basename(target_path))
     if width or height or format:
-        return process_image_and_stream(target_path, width, height, format=format)
+        return await asyncio.to_thread(
+            process_image_and_stream, target_path, width, height, format=format
+        )
     return serve_file(
         target_path,
         inline,
