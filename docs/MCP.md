@@ -106,7 +106,7 @@ sequenceDiagram
 ```toml
 [mcp]
 server_name = "nexusgate"          # Server identity sent to AI clients
-server_version = "1.0.2"           # Version advertised in initialization
+server_version = "1.0.3"           # Version advertised in initialization
 max_result_rows = 50               # Max rows returned per query
 max_directory_entries = 100        # Max files listed per directory
 max_file_read_bytes = 1048576      # Max file read size (1 MB)

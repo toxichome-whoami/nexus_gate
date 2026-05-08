@@ -92,7 +92,7 @@ class MCPConfig(BaseModel):
     """Configuration for the Model Context Protocol (MCP) server."""
 
     server_name: str = "nexusgate"
-    server_version: str = "1.0.2"  # Mirrors src/__init__.py __version__
+    server_version: str = "1.0.3"  # Mirrors src/__init__.py __version__
     max_result_rows: int = 50
     max_directory_entries: int = 100
     max_file_read_bytes: int = 1_048_576
@@ -236,7 +236,7 @@ class NexusGateConfig(BaseModel):
     """The absolute Master Layout tracking all active operational parameters per-boot."""
 
     server: ServerConfig = Field(default_factory=ServerConfig)
-    __version__: str = "1.0.0"
+    __version__: str = "1.0.3"
     features: FeaturesConfig = Field(default_factory=FeaturesConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)

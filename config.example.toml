@@ -33,7 +33,7 @@ mcp = true                       # Enable Model Context Protocol server
 # ─── Model Context Protocol (MCP) ─────────────────────
 [mcp]
 server_name = "nexusgate"
-server_version = "1.0.0"
+server_version = "1.0.3"
 
 # ─── Logging ──────────────────────────────────────────
 [logging]
