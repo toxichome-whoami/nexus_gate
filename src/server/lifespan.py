@@ -39,11 +39,13 @@ def _should_start_daemons() -> bool:
     """Returns True if this worker should own the background daemons."""
     try:
         os.makedirs("data", exist_ok=True)
-        if os.path.exists(_DAEMON_LOCK):
-            return False
-        with open(_DAEMON_LOCK, "w") as f:
-            f.write(str(os.getpid()))
+        # Atomic create — O_CREAT|O_EXCL fails if file already exists (no TOCTOU race)
+        fd = os.open(_DAEMON_LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
         return True
+    except FileExistsError:
+        return False
     except (OSError, PermissionError):
         return True  # Can't lock — run anyway
 
