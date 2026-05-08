@@ -29,8 +29,24 @@ class DatabasePoolManager:
     # ─────────────────────────────────────────────────────────────────────────────
 
     @classmethod
+    def _get_worker_scaled_pool(cls, db_config):
+        """Scales pool size down when multiple workers run."""
+        cfg = GlobalConfigProvider().get_config()
+        workers = max(cfg.server.workers, 1)
+        if workers <= 1:
+            return db_config
+        pool_min = max(1, db_config.pool_min // workers)
+        pool_max = max(2, db_config.pool_max // workers)
+        import copy
+        scaled = copy.copy(db_config)
+        scaled.pool_min = pool_min
+        scaled.pool_max = pool_max
+        return scaled
+
+    @classmethod
     def _instantiate_engine(cls, db_config) -> DatabaseEngine:
         """Factory method mapping a config dialect enum to its engine instance."""
+        db_config = cls._get_worker_scaled_pool(db_config)
         engine_type = db_config.engine
         if engine_type == DbEngineType.SQLITE:
             return SQLiteEngine(db_config)

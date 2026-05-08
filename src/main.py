@@ -1,4 +1,5 @@
 import gc
+import os
 import sys
 
 import uvicorn
@@ -9,6 +10,14 @@ from config.loader import ConfigManager
 def _optimize_garbage_collection():
     """Optimizes GC for high-throughput API serving — reduces pause frequency."""
     gc.set_threshold(700, 10, 10)
+
+
+def _resolve_workers(cfg_workers: int) -> int:
+    if os.name == "nt":
+        return 1  # Windows: multi-worker breaks socket sharing
+    if cfg_workers > 0:
+        return cfg_workers
+    return 1  # Single worker by default
 
 
 def _resolve_config_path() -> str:
@@ -37,12 +46,13 @@ def main():
     config = ConfigManager.load(config_path)
 
     loop_strategy = _acquire_event_loop_strategy()
+    actual_workers = _resolve_workers(config.server.workers)
 
     uvicorn.run(
         "server.app:create_app",
         host=config.server.host,
         port=config.server.port,
-        workers=config.server.workers if config.server.workers > 0 else 1,
+        workers=actual_workers,
         factory=True,
         log_level=config.logging.level.lower(),
         timeout_keep_alive=config.server.request_timeout,

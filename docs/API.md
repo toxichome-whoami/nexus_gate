@@ -184,7 +184,7 @@ curl -X POST "http://localhost:4500/api/v1/db/main_db/users/rows" \
 
 ### 6. Update Rows
 ```bash
-curl -X PUT "http://localhost:4500/api/v1/db/main_db/users/rows" \
+curl -X PATCH "http://localhost:4500/api/v1/db/main_db/users/rows" \
      -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{

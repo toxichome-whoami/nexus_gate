@@ -106,6 +106,7 @@ async def _send_rejection_response(send: Send, limit: int, window: int):
         }
     )
 
+    retry_after = str(window).encode("ascii")
     reset_time = str(int(time.time() + window)).encode("ascii")
     limit_bytes = str(limit).encode("ascii")
 
@@ -116,6 +117,7 @@ async def _send_rejection_response(send: Send, limit: int, window: int):
             "headers": [
                 (b"content-type", b"application/json"),
                 (b"content-length", str(len(body)).encode("ascii")),
+                (b"retry-after", retry_after),
                 (b"x-ratelimit-limit", limit_bytes),
                 (b"x-ratelimit-remaining", b"0"),
                 (b"x-ratelimit-reset", reset_time),

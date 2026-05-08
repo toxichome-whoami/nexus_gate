@@ -666,7 +666,7 @@ async def insert_rows(
         raise NexusGateException(ErrorCodes.DB_QUERY_FAILED, str(exec_error), 500)
 
 
-@router.put("/{db_name}/{table_name}/rows")
+@router.patch("/{db_name}/{table_name}/rows")
 async def update_rows(
     request: Request,
     body: UpdateRequest,

@@ -8,7 +8,7 @@
 [server]
 host = "0.0.0.0"                 # Bind to all interfaces
 port = 4500                      # Public port
-workers = 0                      # 0 = auto-detect based on CPU cores (CPUs * 2 + 1)
+workers = 1                      # 1 = single worker (clean logs, shared cache). >1 for multi-worker.
 max_connections = 10000          # Maximum concurrent TCP connections
 request_timeout = 30             # Timeout per request in seconds
 body_limit = "10mb"              # Maximum request body size (e.g., "10mb", "1gb")
