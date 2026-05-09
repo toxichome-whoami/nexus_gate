@@ -258,7 +258,7 @@ async def _handle_direct_upload(
         file, target_path, scanner, filename
     )
 
-    emit_event(
+    await emit_event(
         "fs",
         "write",
         alias,
@@ -431,7 +431,7 @@ async def _action_finalize(request: Request, body: dict, alias: str, auth: AuthC
     target = _get_storage_path(alias, session["path"], auth)
 
     result = await ChunkedUploadManager.finalize(upload_id, target)
-    emit_event(
+    await emit_event(
         "fs",
         "write",
         alias,

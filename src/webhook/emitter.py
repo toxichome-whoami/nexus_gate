@@ -2,7 +2,8 @@ import asyncio
 import base64
 import hmac
 import time
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, Optional, Tuple
 
 import structlog
 from pydantic import BaseModel
@@ -45,13 +46,71 @@ class WebhookQueueList:
     """Manages the in-memory buffered transmission buffer queue."""
 
     _queue: Optional[asyncio.Queue] = None
+    _maxsize: int = 0
 
     @classmethod
     def get_queue(cls) -> asyncio.Queue:
         if cls._queue is None:
             config = GlobalConfigProvider().get_config()
-            cls._queue = asyncio.Queue(maxsize=config.webhooks.queue_size)
+            cls._maxsize = config.webhooks.queue_size
+            cls._queue = asyncio.Queue(maxsize=cls._maxsize)
         return cls._queue
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pre-Compiled Rule Cache
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledRule:
+    """Pre-parsed rule components for O(1) matching per event."""
+
+    module: str
+    operation: str
+    alias: str
+    targets: Tuple[str, ...]  # Immutable tuple for fast 'in' checks
+
+
+# {hook_name: CompiledRule}
+_compiled_rules: Dict[str, CompiledRule] = {}
+
+
+def _compile_rules() -> None:
+    """Pre-compiles all webhook rules from config into structured objects.
+    Called once at startup and again on config hot-reload."""
+    global _compiled_rules
+    config = GlobalConfigProvider().get_config()
+    if not config.features.webhook or not config.webhooks.enabled:
+        _compiled_rules = {}
+        return
+
+    new_rules: Dict[str, CompiledRule] = {}
+    for name, hook in config.webhook.items():
+        try:
+            r_mod_op, r_alias_target = hook.rule.split("@")
+            r_mod, r_op = r_mod_op.split(".")
+            r_alias, r_target = r_alias_target.split(":")
+            targets = (
+                tuple(t.strip() for t in r_target.split(","))
+                if r_target != "*"
+                else ("*",)
+            )
+            new_rules[name] = CompiledRule(
+                module=r_mod,
+                operation=r_op,
+                alias=r_alias,
+                targets=targets,
+            )
+        except (ValueError, AttributeError) as e:
+            logger.warning("Skipping malformed webhook rule", hook=name, error=str(e))
+            continue
+
+    _compiled_rules = new_rules
+
+
+# Compile on first import
+_compile_rules()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -71,7 +130,8 @@ def _is_token_matched(hook_secret: str, provided_token: Optional[str]) -> bool:
         return False
 
 
-def _is_rule_matched(
+def _is_rule_matched_compiled(
+    compiled: CompiledRule,
     hook,
     module: str,
     operation: str,
@@ -79,27 +139,21 @@ def _is_rule_matched(
     target: str,
     trigger: WebhookTrigger,
 ) -> bool:
-    """Evaluates the dynamic routing rules defined in config against an outbound event."""
+    """O(1) rule matching against pre-compiled rule components."""
     if not hook.enabled:
         return False
 
-    r_mod_op, r_alias_target = hook.rule.split("@")
-    r_mod, r_op = r_mod_op.split(".")
-    r_alias, r_target = r_alias_target.split(":")
-
-    if r_mod not in ("*", module):
+    if compiled.module not in ("*", module):
         return False
 
-    if r_op not in ("*", "any", operation):
+    if compiled.operation not in ("*", "any", operation):
         return False
 
-    if r_alias not in ("*", resource):
+    if compiled.alias not in ("*", resource):
         return False
 
-    if r_target != "*":
-        allowed_targets = [t.strip() for t in r_target.split(",")]
-        if target not in allowed_targets:
-            return False
+    if compiled.targets[0] != "*" and target not in compiled.targets:
+        return False
 
     return _is_token_matched(hook.secret, trigger.webhook_token)
 
@@ -133,7 +187,7 @@ def _build_payload(
     )
 
 
-def emit_event(
+async def emit_event(
     module: str,
     operation: str,
     resource: str,
@@ -142,15 +196,20 @@ def emit_event(
     details: Dict[str, Any],
     trigger: WebhookTrigger,
 ) -> None:
-    """Entry point invoked by endpoints determining if webhook sync operations should fire."""
+    """Async entry point for webhook emission with pre-compiled O(1) rule matching."""
     config = GlobalConfigProvider().get_config()
     if not config.features.webhook or not config.webhooks.enabled:
         return
 
-    # Map configured listeners
+    # Match against pre-compiled rules — no string parsing per event
     matched_hooks = []
     for name, hook in config.webhook.items():
-        if _is_rule_matched(hook, module, operation, resource, target, trigger):
+        compiled = _compiled_rules.get(name)
+        if compiled is None:
+            continue
+        if _is_rule_matched_compiled(
+            compiled, hook, module, operation, resource, target, trigger
+        ):
             matched_hooks.append((name, hook))
 
     if not matched_hooks:

@@ -1,5 +1,6 @@
 import asyncio
 import time
+from typing import Optional, Set
 
 import httpx
 import structlog
@@ -11,7 +12,10 @@ from webhook.signer import generate_signature
 logger = structlog.get_logger()
 
 # Shared async client for connection pooling
-_client = None
+_client: Optional[httpx.AsyncClient] = None
+
+# Track retry tasks to cancel on shutdown — prevents orphaned coroutines
+_retry_tasks: Set[asyncio.Task] = set()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Internal Subsystems
@@ -38,7 +42,9 @@ def _schedule_retry(queue: asyncio.Queue, task: dict, delay_sec: int):
         except asyncio.QueueFull:
             logger.error("Webhook queue full during retry, dropping")
 
-    asyncio.create_task(retry_routine())
+    t = asyncio.create_task(retry_routine())
+    _retry_tasks.add(t)
+    t.add_done_callback(_retry_tasks.discard)
 
 
 async def _process_dispatch_task(
@@ -105,8 +111,25 @@ def _handle_dispatch_failure(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Entrypoint Worker
+# Lifecycle & Entrypoint
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+async def webhook_shutdown():
+    """Cancels all pending retry tasks and closes the HTTP client.
+    Called from lifespan teardown to prevent resource leaks."""
+    global _client
+
+    # Cancel all pending retry tasks
+    for task in list(_retry_tasks):
+        task.cancel()
+    _retry_tasks.clear()
+
+    # Close the HTTP client
+    if _client is not None:
+        await _client.aclose()
+        _client = None
+        logger.info("Webhook HTTP client closed")
 
 
 async def dispatcher_worker():
@@ -116,24 +139,27 @@ async def dispatcher_worker():
     client = _get_client()
     config = GlobalConfigProvider().get_config()
 
-    while True:
-        try:
-            task = await queue.get()
+    try:
+        while True:
             try:
-                await _process_dispatch_task(task, queue, client, config)
-            finally:
-                queue.task_done()
+                task = await queue.get()
+                try:
+                    await _process_dispatch_task(task, queue, client, config)
+                finally:
+                    queue.task_done()
 
-        except asyncio.CancelledError:
-            logger.info("Webhook dispatcher shutting down")
-            if _client:
-                await _client.aclose()
-            break
+            except asyncio.CancelledError:
+                raise  # Let the outer try/finally handle cleanup
 
-        except Exception as system_error:
-            logger.error(
-                "Dispatcher encountered unexpected error", error=str(system_error)
-            )
-            await asyncio.sleep(
-                1
-            )  # Prevent CPU spinning on catastrophic iteration fail
+            except Exception as system_error:
+                logger.error(
+                    "Dispatcher encountered unexpected error",
+                    error=str(system_error),
+                )
+                await asyncio.sleep(
+                    1
+                )  # Prevent CPU spinning on catastrophic iteration fail
+    except asyncio.CancelledError:
+        logger.info("Webhook dispatcher shutting down")
+    finally:
+        await webhook_shutdown()

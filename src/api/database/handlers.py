@@ -107,7 +107,7 @@ async def get_db_engine(db_name: str, auth: AuthContext):
     return engine, GlobalConfigProvider().get_config().database[db_name]
 
 
-def _emit_db_webhook_event(
+async def _emit_db_webhook_event(
     request: Request,
     auth: AuthContext,
     db_name: str,
@@ -130,7 +130,7 @@ def _emit_db_webhook_event(
     if action == "SELECT":
         event_type = "read"
 
-    emit_event(
+    await emit_event(
         "db",
         event_type,
         db_name,
@@ -365,7 +365,7 @@ class QueryExecutionPipeline:
 
         if _WEBHOOK_ENABLED:
             webhook_action = "SELECT" if is_read else operations.upper()
-            _emit_db_webhook_event(
+            await _emit_db_webhook_event(
                 request,
                 auth,
                 db_name,
@@ -410,7 +410,7 @@ class QueryExecutionPipeline:
             result = await engine.execute(transpiled_sql, sql_params)
             total_affected += result.affected_rows or 0
 
-        _emit_db_webhook_event(
+        await _emit_db_webhook_event(
             request, auth, db_name, table_name, "INSERT", total_affected
         )
         return total_affected
