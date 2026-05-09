@@ -1,5 +1,4 @@
 import base64
-import hashlib
 import hmac
 
 from fastapi import Depends, Request, Security
@@ -9,7 +8,7 @@ from api.errors import ErrorCodes, NexusGateException
 from config.provider import get_config_dependency
 from config.schema import NexusGateConfig
 from security.ban_list import BanList
-from utils.types import AuthContext, ServerMode
+from utils.types import AuthContext
 
 security = HTTPBearer(auto_error=False)
 
@@ -104,7 +103,6 @@ def _get_federation_context(request: Request, config) -> AuthContext:
         rate_limit_override=0,
         full_admin=False,  # Nodes are inherently isolated from administrative capacities
     )
-
 
 
 def _get_static_key_context(key_name: str, secret: str, config) -> AuthContext:

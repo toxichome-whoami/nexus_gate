@@ -30,7 +30,7 @@ class BanList:
     ):
         expires_at = time.time() + duration_seconds if duration_seconds else None
         entry = {"reason": reason, "expires_at": expires_at}
-        
+
         if entity_type == "ip":
             cls._bans_cache_ip[identifier] = entry
         elif entity_type == "key":
@@ -45,7 +45,9 @@ class BanList:
         return False
 
     @classmethod
-    def _check_ban(cls, entity_type: str, identifier: str) -> Tuple[bool, Optional[str]]:
+    def _check_ban(
+        cls, entity_type: str, identifier: str
+    ) -> Tuple[bool, Optional[str]]:
         cache = cls._bans_cache_ip if entity_type == "ip" else cls._bans_cache_key
         entry = cache.get(identifier)
 

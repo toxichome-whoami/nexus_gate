@@ -20,7 +20,6 @@ from config.provider import GlobalConfigProvider
 from mcp.server.sse import SseServerTransport
 from server.middleware.auth import (
     _evaluate_network_bans,
-    _get_dynamic_key_context,
     _get_static_key_context,
     _parse_bearer_token,
 )
@@ -84,11 +83,9 @@ def _authenticate_from_request(request: Request) -> None:
     except Exception as ban_error:
         raise _auth_error(str(ban_error), 403)
 
-    # Resolve credentials: dynamic keys first, then static config keys
+    # Resolve credentials: static config keys only (SQLite removed)
     try:
-        auth_ctx = _get_dynamic_key_context(key_name, secret)
-        if not auth_ctx:
-            auth_ctx = _get_static_key_context(key_name, secret, config)
+        auth_ctx = _get_static_key_context(key_name, secret, config)
     except Exception as auth_error:
         raise _auth_error(str(auth_error), 401)
 

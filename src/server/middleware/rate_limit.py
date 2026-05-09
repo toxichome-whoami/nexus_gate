@@ -68,7 +68,7 @@ def _get_determine_effective_limits_cache():
 
 def _determine_effective_limits_impl(api_key_name: str) -> int:
     """Calculates exactly how many requests this key is allowed per rolling window.
-    Cached to avoid redundant SecurityStorage lookups on every request."""
+    Cached to avoid redundant config lookups on every request."""
     config = GlobalConfigProvider().get_config()
     base_limit = config.rate_limit.max_requests
 

@@ -38,6 +38,7 @@ class DatabasePoolManager:
         pool_min = max(1, db_config.pool_min // workers)
         pool_max = max(2, db_config.pool_max // workers)
         import copy
+
         scaled = copy.copy(db_config)
         scaled.pool_min = pool_min
         scaled.pool_max = pool_max

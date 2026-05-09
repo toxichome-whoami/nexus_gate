@@ -7,7 +7,7 @@ Every tool resolves engines through this class instead of touching the pool dire
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Tuple, cast
 
 from config.provider import GlobalConfigProvider
 from config.schema import DatabaseDefConfig
@@ -33,7 +33,7 @@ class EngineResolver:
     @staticmethod
     async def require_engine_and_config(
         alias: str,
-    ) -> tuple[DatabaseEngine, DatabaseDefConfig]:
+    ) -> Tuple[DatabaseEngine, DatabaseDefConfig]:
         """Returns both engine and its config. Raises on missing alias."""
         config = GlobalConfigProvider().get_config()
         db_config = config.database.get(alias)
@@ -41,7 +41,7 @@ class EngineResolver:
             raise RuntimeError(f"Database '{alias}' is not configured.")
 
         engine = await EngineResolver.require_engine(alias)
-        return engine, db_config
+        return cast(DatabaseEngine, engine), cast(DatabaseDefConfig, db_config)
 
 
 class ResultFormatter:
